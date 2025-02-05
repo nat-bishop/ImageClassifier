@@ -21,9 +21,8 @@ if __name__ == '__main__':
     num_colors = 5
     classifier = ClassifierType.KMEANS
     palette = create_palette(image_path, num_colors, classifier)
-    print(palette)
     print(analyze_palette_harmony(palette))
-    #display_multiple_classifiers({classifier: pallete})
+    display_multiple_classifiers({classifier: palette})
     #palettes = {classifier.name: create_palette(image_path, num_colors, classifier) for classifier in ClassifierType}
     #display_multiple_classifiers(palettes)
 

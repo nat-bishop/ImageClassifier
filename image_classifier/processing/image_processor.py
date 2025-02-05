@@ -13,7 +13,7 @@ class ImageProcessor:
     def __init__(self, image_path: Path, classifier: ColorClassifier):
         self.image_path = image_path
         self.classifier = classifier
-        self.image = self.load_image
+        self.image = self.load_image()
         logger.info(f"Initialized ImageProcessor with image path: {self.image_path}")
 
     def load_image(self) -> np.ndarray:
