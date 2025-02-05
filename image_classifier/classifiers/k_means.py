@@ -1,12 +1,17 @@
+import logging
+
 import numpy as np
 from sklearn.cluster import KMeans
 
-from classifiers.base_classifier import ColorClassifier
+from image_classifier.classifiers.base_classifier import ColorClassifier
 
+
+logger = logging.getLogger(__name__)
 
 class KMeansColorClassifier(ColorClassifier):
     def extract_colors(self, image: np.ndarray, num_colors: int) -> list:
         """Extract colors using K-Means clustering."""
+        logger.info(f"Extracting {num_colors} colors using KMeans.")
         pixels = image.reshape(-1, 3)  # Flatten image
         kmeans = KMeans(n_clusters=num_colors, random_state=0, n_init=10)
         kmeans.fit(pixels)

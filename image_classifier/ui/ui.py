@@ -27,4 +27,3 @@ def display_multiple_classifiers(classifier_results, title="Extracted Colors fro
 
     plt.suptitle(title, fontsize=12)
     plt.show()
-

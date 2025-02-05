@@ -1,5 +1,15 @@
+import logging
 from abc import ABC, abstractmethod
+from enum import Enum
 import numpy as np
+
+logger = logging.getLogger(__name__)  # Logger for this file
+
+
+class ClassifierType(Enum):
+    KMEANS = 0
+    GUASSIANMIXTURE = 1
+    MEDIANCUT = 2
 
 
 class ColorClassifier(ABC):

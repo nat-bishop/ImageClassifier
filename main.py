@@ -1,22 +1,32 @@
-from UI.ui import display_multiple_classifiers
-from classifiers.guassian_mixture import GMMColorClassifier
-from classifiers.k_means import KMeansColorClassifier
-from classifiers.median_cut import MedianCutColorClassifier
-from processing.color_sorting import sort_by_lab
-from processing.image_processor import ImageProcessor
+from pathlib import Path
+from image_classifier.classifiers.base_classifier import ClassifierType
+from image_classifier.ui.ui import display_multiple_classifiers
+from image_classifier.controllers.controller import create_palette, analyze_palette_harmony
+import logging
+
 
 if __name__ == '__main__':
 
     # Load Image
-    image_path = "testimages/duneposter.jpg"
-    image_processor = ImageProcessor(image_path, None)  # No classifier yet
+    image_path = Path("testimages/duneposter.jpg")
 
-    # Run all classifiers
-    classifier_results = {
-        "K-Means": sort_by_lab(KMeansColorClassifier().extract_colors(image_processor.image, 5)),
-        "Median Cut": sort_by_lab(MedianCutColorClassifier().extract_colors(image_processor.image, 5)),
-        "Guassian Mixture": sort_by_lab(GMMColorClassifier().extract_colors(image_processor.image, 5)),
-    }
+    logging.basicConfig(
+        level=logging.INFO,  # Change to DEBUG if needed
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    )
 
-    # Display all results
-    display_multiple_classifiers(classifier_results)
+    logger = logging.getLogger(__name__)  # Main logger
+    logger.info("Logging is set up!")
+
+    num_colors = 5
+    classifier = ClassifierType.KMEANS
+    palette = create_palette(image_path, num_colors, classifier)
+    print(palette)
+    print(analyze_palette_harmony(palette))
+    #display_multiple_classifiers({classifier: pallete})
+    #palettes = {classifier.name: create_palette(image_path, num_colors, classifier) for classifier in ClassifierType}
+    #display_multiple_classifiers(palettes)
+
+
+
+

@@ -1,13 +1,18 @@
+import logging
+
 from PIL import Image
-import cv2
 import numpy as np
 
-from classifiers.base_classifier import ColorClassifier
+from image_classifier.classifiers.base_classifier import ColorClassifier
+
+
+logger = logging.getLogger(__name__)
 
 
 class MedianCutColorClassifier(ColorClassifier):
     def extract_colors(self, image: np.ndarray, num_colors: int) -> list:
         """Extract colors using the Median Cut algorithm."""
+        logger.info(f"Extracting {num_colors} colors using Median Cut Model.")
         pil_image = Image.fromarray(image)
         pil_image = pil_image.convert("P", palette=Image.ADAPTIVE, colors=num_colors)
         palette = pil_image.getpalette()
