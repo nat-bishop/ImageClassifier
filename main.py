@@ -32,13 +32,10 @@ if __name__ == '__main__':
         print(path)
         print(palette)
         print(analyze_palette_harmony(palette))
-        print('rgbpaleete')
-        print([lab_to_rgb(lab) for lab in palette])
         palettes[path] = [lab_to_rgb(lab) for lab in palette]
 
     display_multiple_classifiers(palettes)
-    #palettes = {classifier.name: create_palette(image_path, num_colors, classifier) for classifier in ClassifierType}
-    #display_multiple_classifiers(palettes)
+
 
 
 
