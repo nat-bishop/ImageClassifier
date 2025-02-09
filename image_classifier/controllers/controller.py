@@ -8,11 +8,11 @@ from image_classifier.classifiers.base_classifier import ClassifierType, ColorCl
 from image_classifier.classifiers.k_means import KMeansColorClassifier
 from image_classifier.classifiers.guassian_mixture import GMMColorClassifier
 from image_classifier.classifiers.median_cut import MedianCutColorClassifier
-from image_classifier.processing.color_harmony import is_complementary, is_triadic, is_split_complementary, is_tetradic, \
-    is_square, is_analogous
+from image_classifier.processing.color_harmony import score_triadic, score_analogous, score_square, score_complementary, \
+    score_split_complementary, score_monochromatic, score_contrast_absolute, score_saturation_absolute
 from image_classifier.processing.color_sorting import sort_by_lab
 from image_classifier.processing.image_processor import ImageProcessor
-from image_classifier.processing.utils import rgb_to_lab
+from image_classifier.processing.utils import rgb_to_lab, lab_to_hue
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def create_palette(image_path: Path, num_colors: int, classifier_type: Classifie
         classifier_type (ClassifierType): The classifier type to use.
 
     Returns:
-        List[List[int]]: Sorted list of extracted RGB colors.
+        List[List[int]]: Sorted list of extracted LAB colors.
     """
     if classifier_type not in CLASSIFIER_MAP:
         logger.error(f"Invalid classifier type: {classifier_type}")
@@ -63,23 +63,23 @@ def create_palette(image_path: Path, num_colors: int, classifier_type: Classifie
 
 
 def analyze_palette_harmony(palette: List[tuple[int, int, int]]) -> str:
-    """Analyzes a palette as a whole and assigns a single harmony type."""
-    lab_colors = rgb_to_lab(palette)
+    """Analyzes a palette of LAB colors as a whole and assigns a single harmony type."""
+    hues = [lab_to_hue(lab) for lab in palette]
+    print("HUES")
+    print(hues)
+    print("Triadic score:", score_triadic(hues))
 
-    # Convert LAB to Hue (CIE-LCH color space)
-    hues = [np.degrees(np.arctan2(lab[2], lab[1])) % 360 for lab in lab_colors]
+    print("Square score:", score_square(hues))
 
-    if len(hues) == 2 and is_complementary(hues):
-        return "Complementary"
-    elif len(hues) == 3 and is_triadic(hues):
-        return "Triadic"
-    elif len(hues) == 3 and is_split_complementary(hues):
-        return "Split Complementary"
-    elif len(hues) == 4 and is_tetradic(hues):
-        return "Tetradic (Compound)"
-    elif len(hues) == 4 and is_square(hues):
-        return "Square"
-    elif is_analogous(hues):
-        return "Analogous"
-    else:
-        return "No Clear Harmony"
+    print("Analogous score:", score_analogous(hues))
+
+    print("Complementary score:", score_complementary(hues))
+
+    print("Split Complementary score:", score_split_complementary(hues))
+
+    print("Monochromatic score: ", score_monochromatic(hues))
+
+    print("Contrast score: ", score_contrast_absolute(palette))
+
+    print("Saturation score: ", score_saturation_absolute(palette))
+

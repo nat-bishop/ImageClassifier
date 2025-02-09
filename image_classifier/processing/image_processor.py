@@ -24,7 +24,7 @@ class ImageProcessor:
             raise FileNotFoundError(f"Image not found at path: {self.image_path}")
 
         logger.info(f"Successfully loaded image: {self.image_path}")
-        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
+        return cv2.cvtColor(image, cv2.COLOR_BGR2LAB)  # Convert to LAB
 
     def extract_colors(self, num_colors: int = 5) -> list:
         """Uses the selected classifier to extract colors."""
