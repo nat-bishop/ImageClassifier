@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 from image_classifier.classifiers.base_classifier import ClassifierType
-from image_classifier.processing.utils import lab_to_rgb
 from image_classifier.ui.ui import display_multiple_classifiers
 from image_classifier.controllers.controller import create_palette, analyze_palette_harmony
 import logging
@@ -17,8 +17,10 @@ if __name__ == '__main__':
                    Path("testimages/thebear.jpg")]
 
     logging.basicConfig(
-        level=logging.WARNING,
+        level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],  # Ensure logs appear in PyCharm's console
+        force=True  # Ensures reconfiguration of logging
     )
 
     logger = logging.getLogger(__name__)  # Main logger
@@ -29,14 +31,8 @@ if __name__ == '__main__':
     palettes = {}
     for path in image_paths:
         palette = create_palette(path, num_colors, classifier)
-        print(path)
-        print(palette)
-        print(analyze_palette_harmony(palette))
-        palettes[path] = [lab_to_rgb(lab) for lab in palette]
+        logging.info(f'Image Name: {path.name}')
+        color_harmony = analyze_palette_harmony(palette)
+        palettes[path] = [color.rgb for color in palette]
 
     display_multiple_classifiers(palettes)
-
-
-
-
-

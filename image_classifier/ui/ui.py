@@ -37,7 +37,7 @@ def plot_color_wheel_with_highlights(ax, colors, wheel_size=300):
     # Convert RGB colors to HSV for correct placement
     for color in colors:
         hsv_color = cv2.cvtColor(np.uint8([[color]]), cv2.COLOR_RGB2HSV)[0][0]
-        hue = hsv_color[0] * 2  # OpenCV scales hue from 0-180
+        hue = int(hsv_color[0]) * 2  # OpenCV scales hue from 0-180
         sat = hsv_color[1] / 255.0  # Normalize saturation
 
         # Convert hue and saturation to x, y for plotting

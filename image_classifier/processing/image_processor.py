@@ -5,6 +5,7 @@ import numpy as np
 import logging
 
 from image_classifier.classifiers.base_classifier import ColorClassifier
+from image_classifier.color.color import Color
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class ImageProcessor:
         logger.info(f"Successfully loaded image: {self.image_path}")
         return cv2.cvtColor(image, cv2.COLOR_BGR2LAB)  # Convert to LAB
 
-    def extract_colors(self, num_colors: int = 5) -> list:
+    def extract_colors(self, num_colors: int = 5) -> list[Color]:
         """Uses the selected classifier to extract colors."""
         logger.info(f"Extracting {num_colors} colors using {self.classifier.__class__.__name__}")
         colors = self.classifier.extract_colors(self.image, num_colors)

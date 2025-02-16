@@ -1,9 +1,5 @@
 import logging
 from pathlib import Path
-from typing import List
-
-import numpy as np
-
 from image_classifier.classifiers.base_classifier import ClassifierType, ColorClassifier
 from image_classifier.classifiers.k_means import KMeansColorClassifier
 from image_classifier.classifiers.guassian_mixture import GMMColorClassifier
@@ -12,7 +8,7 @@ from image_classifier.processing.color_harmony import score_triadic, score_analo
     score_split_complementary, score_monochromatic, score_contrast_absolute, score_saturation_absolute
 from image_classifier.processing.color_sorting import sort_by_lab
 from image_classifier.processing.image_processor import ImageProcessor
-from image_classifier.processing.utils import rgb_to_lab, lab_to_hue
+from image_classifier.color.color import Color
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +20,7 @@ CLASSIFIER_MAP = {
 }
 
 
-def create_palette(image_path: Path, num_colors: int, classifier_type: ClassifierType) -> List[tuple[int, int, int]]:
+def create_palette(image_path: Path, num_colors: int, classifier_type: ClassifierType) -> list[Color]:
     """
     Creates a color palette from an image using the given classifier type.
 
@@ -46,10 +42,8 @@ def create_palette(image_path: Path, num_colors: int, classifier_type: Classifie
     try:
         processor = ImageProcessor(image_path, classifier)
         colors = processor.extract_colors(num_colors)
-        logger.info(f"Extracted {len(colors)} colors from image.")
 
         sorted_colors = sort_by_lab(colors)
-        logger.info("Color sorting completed.")
 
         return sorted_colors
 
@@ -62,24 +56,18 @@ def create_palette(image_path: Path, num_colors: int, classifier_type: Classifie
         raise
 
 
-def analyze_palette_harmony(palette: List[tuple[int, int, int]]) -> str:
-    """Analyzes a palette of LAB colors as a whole and assigns a single harmony type."""
-    hues = [lab_to_hue(lab) for lab in palette]
-    print("HUES")
-    print(hues)
-    print("Triadic score:", score_triadic(hues))
+def analyze_palette_harmony(palette: list[Color]) -> dict:
+    """Analyzes a palette of LAB colors"""
+    hues = [color.lab_hue for color in palette]
+    color_harmony = {'Triadic': score_triadic(hues),
+                     'Square': score_square(hues),
+                     'Analogous': score_analogous(hues),
+                     'Complementary': score_complementary(hues),
+                     'Split Complementary': score_split_complementary(hues),
+                     'Monochromatic': score_monochromatic(hues),
+                     'Contrast': score_contrast_absolute(palette),
+                     'Saturation': score_saturation_absolute(palette)}
 
-    print("Square score:", score_square(hues))
-
-    print("Analogous score:", score_analogous(hues))
-
-    print("Complementary score:", score_complementary(hues))
-
-    print("Split Complementary score:", score_split_complementary(hues))
-
-    print("Monochromatic score: ", score_monochromatic(hues))
-
-    print("Contrast score: ", score_contrast_absolute(palette))
-
-    print("Saturation score: ", score_saturation_absolute(palette))
-
+    for score_type, score in color_harmony.items():
+        logger.info(f'{score_type}: {score:.2f}')
+    return color_harmony

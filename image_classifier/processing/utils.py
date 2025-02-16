@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import numpy as np
 import cv2
 import logging
@@ -7,8 +5,7 @@ import math
 
 logger = logging.getLogger(__name__)
 
-
-def rgb_to_lab(colors: list[tuple[int, int, int]]) -> np.ndarray:
+def krgb_to_lab(colors: list[tuple[int, int, int]]) -> np.ndarray:
     """
     Converts a list of RGB colors to CIE-LAB color space.
 
@@ -29,13 +26,13 @@ def rgb_to_lab(colors: list[tuple[int, int, int]]) -> np.ndarray:
     return lab_colors
 
 
-def lab_to_rgb(lab_color: tuple[int, int, int]) -> tuple[int, ...]:
+def klab_to_rgb(lab_color: tuple[int, int, int]) -> tuple[int, ...]:
     lab_array = np.uint8(np.asarray([[lab_color]]))
     rgb_array = cv2.cvtColor(lab_array, cv2.COLOR_LAB2RGB)
     return tuple(int(x) for x in rgb_array[0, 0])
 
 
-def lab_to_hue(lab_color: tuple[int, int, int]) -> float:
+def hlab_to_hue(lab_color: tuple[int, int, int]) -> float:
     """
     Extracts the hue angle (in degrees) from a Lab color.
 
@@ -49,3 +46,4 @@ def lab_to_hue(lab_color: tuple[int, int, int]) -> float:
     b = int(lab_color[2]) - 128
     hue = (math.degrees(math.atan2(b, a)) + 360) % 360
     return hue
+

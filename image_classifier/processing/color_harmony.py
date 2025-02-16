@@ -1,8 +1,8 @@
 import math
 import logging
-from typing import List, Optional, Tuple, Any
 
-# Set up logging configuration.
+from image_classifier.color.color import Color
+
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -18,11 +18,12 @@ def circular_diff(a: float, b: float) -> float:
     return result
 
 
-def circular_mean(angles: List[float]) -> float:
+def circular_mean(angles: list[float]) -> float:
     """
     Computes the circular mean of a list of angles (in degrees).
     Uses the standard method via summing sine and cosine components.
     """
+
     sin_sum = sum(math.sin(math.radians(a)) for a in angles)
     cos_sum = sum(math.cos(math.radians(a)) for a in angles)
     if sin_sum == 0 and cos_sum == 0:
@@ -34,7 +35,7 @@ def circular_mean(angles: List[float]) -> float:
     return mean_angle
 
 
-def score_triadic(hues: List[float], tolerance: float = 30) -> float:
+def score_triadic(hues: list[float], tolerance: float = 30) -> float:
     """
     Returns a harmony score (0 to 1) for a triadic palette.
     A perfect triadic palette (3 hues exactly 120° apart) scores 1.
@@ -62,7 +63,7 @@ def score_triadic(hues: List[float], tolerance: float = 30) -> float:
     return score
 
 
-def score_square(hues: List[float], tolerance: float = 15) -> float:
+def score_square(hues: list[float], tolerance: float = 15) -> float:
     """
     Returns a harmony score (0 to 1) for a square palette.
     In an ideal square scheme, 4 hues are exactly 90° apart.
@@ -88,7 +89,7 @@ def score_square(hues: List[float], tolerance: float = 15) -> float:
     return score
 
 
-def score_analogous(hues: List[float], threshold: float = 120) -> float:
+def score_analogous(hues: list[float], threshold: float = 120) -> float:
     """
     Returns a score (0 to 1) for an analogous scheme.
     The idea is that all hues should be grouped closely together.
@@ -105,7 +106,7 @@ def score_analogous(hues: List[float], threshold: float = 120) -> float:
     return score
 
 
-def score_complementary(hues: List[float], tolerance_mean: float = 60, tolerance_spread: float = 120) -> float:
+def score_complementary(hues: list[float], tolerance_mean: float = 60, tolerance_spread: float = 120) -> float:
     """
     Returns a harmony score (0 to 1) for a complementary palette.
 
@@ -171,7 +172,7 @@ def score_complementary(hues: List[float], tolerance_mean: float = 60, tolerance
     return best_score
 
 
-def score_split_complementary(hues: List[float], tolerance: float = 30) -> float:
+def score_split_complementary(hues: list[float], tolerance: float = 30) -> float:
     """
     Returns a score (0 to 1) for a split-complementary scheme without assuming a fixed base hue.
 
@@ -229,7 +230,7 @@ def score_split_complementary(hues: List[float], tolerance: float = 30) -> float
     return best_score
 
 
-def score_saturation_absolute(lab_colors: List[Tuple[int, int, int]]) -> float:
+def score_saturation_absolute(colors: list[Color]) -> float:
     """
     Computes an absolute saturation score for a palette.
 
@@ -242,24 +243,25 @@ def score_saturation_absolute(lab_colors: List[Tuple[int, int, int]]) -> float:
     Returns:
         float: A score between 0 and 1.
     """
-    if not lab_colors:
+    if not colors:
         return 0.0
 
     # Maximum chroma for OpenCV Lab: sqrt((128)^2 + (128)^2) ~ 181.02
     max_chroma = math.sqrt(128 ** 2 + 128 ** 2)
     total_chroma = 0.0
-    for L, a, b in lab_colors:
+    for color in colors:
+        _, a, b = color.lab
         # Calculate chroma (saturation) for this color
         chroma = math.sqrt((a - 128) ** 2 + (b - 128) ** 2)
         total_chroma += chroma
 
-    avg_chroma = total_chroma / len(lab_colors)
+    avg_chroma = total_chroma / len(colors)
     # Normalize the average chroma to [0, 1]
     score = avg_chroma / max_chroma
     return min(max(score, 0.0), 1.0)
 
 
-def score_contrast_absolute(lab_colors: List[Tuple[int, int, int]]) -> float:
+def score_contrast_absolute(colors: list[Color]) -> float:
     """
     Computes an absolute contrast score based on the L (lightness) channel.
 
@@ -267,15 +269,16 @@ def score_contrast_absolute(lab_colors: List[Tuple[int, int, int]]) -> float:
     and 1 means maximum contrast (the lightness range is 255).
 
     Args:
-        lab_colors (List[LabColor]): List of Lab colors (each as a tuple (L, a, b)).
+        colors (List[Color]): List of colors.
 
     Returns:
         float: A score between 0 and 1.
     """
-    if not lab_colors:
+    if not colors:
         return 0.0
 
     # Extract L values from each Lab color
+    lab_colors = [color.lab for color in colors]
     L_values = [L for (L, a, b) in lab_colors]
     contrast_range = max(L_values) - min(L_values)
     # Normalize the contrast range: maximum possible is 255.
@@ -283,7 +286,7 @@ def score_contrast_absolute(lab_colors: List[Tuple[int, int, int]]) -> float:
     return min(max(score, 0.0), 1.0)
 
 
-def score_monochromatic(hues: List[float], tolerance: float = 120) -> float:
+def score_monochromatic(hues: list[float], tolerance: float = 120) -> float:
     """
     Returns a score (0 to 1) for a monochromatic palette.
     For a palette to be monochromatic, all hues should be very similar.
