@@ -1,83 +1,119 @@
 import math
-from enum import Enum
-import numpy as np
 import cv2
+import colorsys
+import numpy as np
+from enum import Enum
 
-# Define a single alias for a color tuple (3 integers).
 ColorTuple = tuple[int, int, int]
 
 
 class ColorType(Enum):
     LAB = 0
     RGB = 1
+    HSV = 2
 
 
 class Color:
     """
-    A flexible color class that accepts a color in either RGB or LAB color space.
-    The color is stored internally in both representations for easy access.
-
-    The input is expected as a ColorTuple (a 3-tuple of integers).
-    - For RGB, values should be in the range 0–255.
-    - For LAB, use OpenCV's 8-bit LAB format: (L, a, b) with L in [0,255] and a, b in [0,255]
-      (with 128 as the neutral point).
+    A simpler color class that stores an internal RGB color in [0..255].
+    On-the-fly properties for .lab or .hsv by converting from RGB.
+    No direct lab->hsv or hsv->lab method (we chain via RGB).
     """
 
     def __init__(self, value: ColorTuple, color_type: ColorType = ColorType.RGB) -> None:
-        if color_type not in ColorType:
-            raise ValueError("Unsupported color space. Use ColorType.RGB or ColorType.LAB.")
-
+        """
+        value:
+            if color_type=RGB => (R,G,B) each in [0..255]
+            if color_type=LAB => (L,A,B) each in [0..255] (OpenCV 8-bit Lab)
+            if color_type=HSV => (H,S,V) with H in [0..359], S,V in [0..255]
+        """
         if color_type == ColorType.RGB:
             self._rgb = value
-            self._lab = self._rgb_to_lab(value)
         elif color_type == ColorType.LAB:
-            self._lab = value
             self._rgb = self._lab_to_rgb(value)
+        elif color_type == ColorType.HSV:
+            self._rgb = self._hsv_to_rgb(value)
+        else:
+            raise ValueError("Unsupported color space: use RGB, LAB, or HSV.")
+
+    # -----------------------------------------------------------
+    # Internal conversions (only the four we really need)
+    # -----------------------------------------------------------
+    @staticmethod
+    def _lab_to_rgb(lab: ColorTuple) -> ColorTuple:
+        """Convert (L,A,B) in [0..255] to (R,G,B) in [0..255]."""
+        arr = np.uint8([[[lab[0], lab[1], lab[2]]]])
+        rgb_arr = cv2.cvtColor(arr, cv2.COLOR_LAB2RGB)
+        r, g, b = rgb_arr[0, 0]
+        return (int(r), int(g), int(b))
 
     @staticmethod
     def _rgb_to_lab(rgb: ColorTuple) -> ColorTuple:
-        """Converts an RGB color (0–255) to LAB using OpenCV."""
-        rgb_array = np.uint8([[list(rgb)]])
-        lab_array = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2LAB)
-        return int(lab_array[0, 0, 0]), int(lab_array[0, 0, 1]), int(lab_array[0, 0, 2])
+        """Convert (R,G,B) in [0..255] to (L,A,B) in [0..255] (OpenCV Lab)."""
+        arr = np.uint8([[[rgb[0], rgb[1], rgb[2]]]])
+        lab_arr = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
+        L, A, B = lab_arr[0, 0]
+        return (int(L), int(A), int(B))
 
     @staticmethod
-    def _lab_to_rgb(lab: ColorTuple) -> ColorTuple:
-        """Converts a LAB color (OpenCV 8-bit) to RGB using OpenCV."""
-        lab_array = np.uint8([[list(lab)]])
-        rgb_array = cv2.cvtColor(lab_array, cv2.COLOR_LAB2RGB)
-        return int(rgb_array[0, 0, 0]), int(rgb_array[0, 0, 1]), int(rgb_array[0, 0, 2])
+    def _hsv_to_rgb(hsv: ColorTuple) -> ColorTuple:
+        """
+        Convert (H,S,V) with H in [0..359], S,V in [0..255]
+        to (R,G,B) in [0..255].
+        """
+        h, s, v = hsv
+        h_f = (h % 360) / 360.0
+        s_f = s / 255.0
+        v_f = v / 255.0
+        r_f, g_f, b_f = colorsys.hsv_to_rgb(h_f, s_f, v_f)
+        return (
+            int(round(r_f * 255)),
+            int(round(g_f * 255)),
+            int(round(b_f * 255))
+        )
 
     @staticmethod
-    def _lab_to_hue(lab: ColorTuple) -> float:
+    def _rgb_to_hsv(rgb: ColorTuple) -> ColorTuple:
         """
-        Extracts the hue angle (in degrees) from a Lab color.
-
-        Args:
-            lab (np.ndarray): A Lab color with shape (3,).
-
-        Returns:
-            float: The hue angle in degrees.
+        Convert (R,G,B) in [0..255] to (H,S,V),
+        with H in [0..359], S,V in [0..255].
         """
-        a = int(lab[1]) - 128
-        b = int(lab[2]) - 128
-        hue = (math.degrees(math.atan2(b, a)) + 360) % 360
-        return hue
+        r, g, b = rgb
+        r_f, g_f, b_f = r / 255.0, g / 255.0, b / 255.0
+        h_f, s_f, v_f = colorsys.rgb_to_hsv(r_f, g_f, b_f)
+        h_deg = int(round(h_f * 360)) % 360
+        s_i = int(round(s_f * 255))
+        v_i = int(round(v_f * 255))
+        return (h_deg, s_i, v_i)
 
+    # -----------------------------------------------------------
+    # Properties
+    # -----------------------------------------------------------
     @property
     def rgb(self) -> ColorTuple:
-        """Returns the RGB representation."""
+        """
+        Internal representation (R,G,B) in [0..255].
+        """
         return self._rgb
 
     @property
     def lab(self) -> ColorTuple:
-        """Returns the LAB representation."""
-        return self._lab
+        """
+        Convert from self._rgb to Lab on the fly.
+        """
+        return self._rgb_to_lab(self._rgb)
 
     @property
-    def lab_hue(self) -> float:
-        """returns hue in range 0-359"""
-        return self._lab_to_hue(self._lab)
+    def hsv(self) -> ColorTuple:
+        """
+        Convert from self._rgb to HSV on the fly.
+        """
+        return self._rgb_to_hsv(self._rgb)
+
+    @property
+    def hex(self) -> str:
+        r, g, b = self.rgb
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def __repr__(self) -> str:
-        return f"Color(RGB={self.rgb}, LAB={self.lab})"
+        return f"Color(rgb={self._rgb})"

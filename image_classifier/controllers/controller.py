@@ -58,7 +58,7 @@ def create_palette(image_path: Path, num_colors: int, classifier_type: Classifie
 
 def analyze_palette_harmony(palette: list[Color]) -> dict:
     """Analyzes a palette of LAB colors"""
-    hues = [color.lab_hue for color in palette]
+    hues = [color.hsv[0] for color in palette]
     color_harmony = {'Triadic': score_triadic(hues),
                      'Square': score_square(hues),
                      'Analogous': score_analogous(hues),
