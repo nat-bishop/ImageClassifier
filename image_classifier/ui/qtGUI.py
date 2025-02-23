@@ -27,14 +27,12 @@ def random_color() -> Color:
     return Color((r, g, b), ColorType.RGB)
 
 
-# -------------------------------------------------------------------
-# ColorBox
-# -------------------------------------------------------------------
 class ColorBox(QLabel):
     """
     A color box that expands within the layout and displays the hex code
     at the bottom. Clicking copies the code to the clipboard.
     """
+
     def __init__(self, color: Color, parent=None):
         super().__init__(parent)
         self.color = color
@@ -73,14 +71,12 @@ class ColorBox(QLabel):
         self.update_appearance()
 
 
-# -------------------------------------------------------------------
-# ColorPalette
-# -------------------------------------------------------------------
 class ColorPalette(QWidget):
     """
     A horizontal collection of ColorBoxes, with methods to
     add, remove, or randomize colors.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
@@ -92,9 +88,9 @@ class ColorPalette(QWidget):
 
         self.layout = layout
         self.colors = [
-            Color((252, 231, 200),  ColorType.RGB),
-            Color((177, 194, 158),  ColorType.RGB),
-            Color((250, 218, 122),  ColorType.RGB),
+            Color((252, 231, 200), ColorType.RGB),
+            Color((177, 194, 158), ColorType.RGB),
+            Color((250, 218, 122), ColorType.RGB),
             Color((240, 160, 75), ColorType.RGB),
         ]
 
@@ -135,15 +131,13 @@ class ColorPalette(QWidget):
             self.color_wheel.update()
 
 
-# -------------------------------------------------------------------
-# ColorWheel
-# -------------------------------------------------------------------
 class ColorWheel(QWidget):
     """
-    A hue–saturation wheel at full brightness, plus a hover table that appears
-    on mouse enter. Each palette color is shown as a white-outlined circle
-    at its (hue, saturation) location.
+    A hue–saturation wheel at full brightness, plus a hover info table.
+    Each palette color is drawn as a white-outlined circle at its (hue, saturation) location.
+    Creates an image at startup then scales it rather than recalulating every resize.
     """
+
     def __init__(self, palette_widget, parent=None):
         super().__init__(parent)
         self.palette_widget = palette_widget
@@ -153,6 +147,7 @@ class ColorWheel(QWidget):
         self.setLayout(layout)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
+        # Info table setup (shown on hover)
         self.info_table = QTableWidget(self)
         self.info_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.info_table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -168,7 +163,6 @@ class ColorWheel(QWidget):
         self.info_table.setFont(font)
         self.info_table.verticalHeader().setDefaultSectionSize(20)
         self.info_table.horizontalHeader().setDefaultSectionSize(60)
-
         self.info_table.horizontalHeader().setVisible(False)
         self.info_table.verticalHeader().setVisible(False)
 
@@ -206,25 +200,23 @@ class ColorWheel(QWidget):
         self.info_table.setColumnWidth(0, 200)
         self.info_table.setColumnWidth(1, 80)
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
+        # Pre-generate a large wheel image for performance
+        self.base_wheel_size = 1024
+        self.wheel_image = self.generate_wheel_image(self.base_wheel_size)
 
-        # Fill background to match the parent window color
-        painter.fillRect(self.rect(), self.palette().window())
-
-        w = self.width()
-        h = self.height()
-        diameter = min(w, h)
-        radius = diameter / 2.0
-
-        center_x = w / 2.0
-        center_y = h / 2.0
-
+    def generate_wheel_image(self, diameter):
+        """
+        Generates a single QImage of a full hue-saturation wheel of size 'diameter'.
+        Saturation is radial (0 in the center, 1 on the edge),
+        Hue is angular (0 to 360 degrees around).
+        Value  is always 1.
+        """
         image = QImage(diameter, diameter, QImage.Format_RGB32)
+        image.fill(Qt.black)
 
+        radius = diameter / 2.0
         bg_color = self.palette().window().color()
-        bg_pixel = bg_color.rgb()
+        bg_pixel = bg_color.rgb()  # color outside of wheel
 
         for y in range(diameter):
             for x in range(diameter):
@@ -232,45 +224,87 @@ class ColorWheel(QWidget):
                 dy = y - radius
                 dist = math.sqrt(dx * dx + dy * dy)
                 if dist <= radius:
+                    # calculate hue (0-360) and saturation (0-1)
                     hue_deg = (math.degrees(math.atan2(-dy, dx)) + 360) % 360
                     sat = dist / radius
                     c = QColor.fromHsvF(hue_deg / 360.0, sat, 1.0)
                     image.setPixel(x, y, c.rgb())
                 else:
+                    # Outside the circle, fill with background color
                     image.setPixel(x, y, bg_pixel)
 
-        top_left_x = center_x - radius
-        top_left_y = center_y - radius
-        painter.drawImage(int(top_left_x), int(top_left_y), image)
+        return image
 
-        # Draw circles for each color
+    def paintEvent(self, event):
+        """
+        Draws the pre-generated hue-saturation wheel image (scaled),
+        then draws each palette color as a white-outlined circle.
+        """
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        # Fill background with the widget's palette
+        painter.fillRect(self.rect(), self.palette().window())
+
+        # Determine the largest fitting diameter in this widget
+        w = self.width()
+        h = self.height()
+        diameter = min(w, h)
+
+        # Scale the wheel image to fit the current diameter
+        scaled_wheel = self.wheel_image.scaled(
+            diameter, diameter,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        # Center the scaled wheel
+        radius = diameter / 2.0
+        top_left_x = (w - diameter) / 2.0
+        top_left_y = (h - diameter) / 2.0
+        painter.drawImage(int(top_left_x), int(top_left_y), scaled_wheel)
+
+        # draw the palette colors as circles
+
         if hasattr(self.palette_widget, 'colors'):
             for color_obj in self.palette_widget.colors:
                 hue, sat, val = color_obj.hsv
+
+                # Convert to floating ranges
+
                 hue_rad = math.radians(hue)
                 sat_f = sat / 255.0
 
-                px = center_x + math.cos(hue_rad) * sat_f * radius
-                py = center_y - math.sin(hue_rad) * sat_f * radius
+                # Coordinates relative to the center of the scaled wheel
+                px = top_left_x + radius + math.cos(hue_rad) * sat_f * radius
+                py = top_left_y + radius - math.sin(hue_rad) * sat_f * radius
 
-                # White outline, actual color inside
                 dot_radius = 18
                 pen = QPen(Qt.white, 4)
                 painter.setPen(pen)
-                painter.setBrush(QColor(*color_obj.rgb))
+                painter.setBrush(QColor(*color_obj.rgb))  # color_obj.rgb is a tuple (r, g, b)
                 painter.drawEllipse(QPointF(px, py), dot_radius, dot_radius)
 
         painter.end()
 
     def enterEvent(self, event):
+        """
+        Show the info table when mouse enters.
+        """
         self.info_table.show()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
+        """
+        Hide the info table when mouse leaves.
+        """
         self.info_table.hide()
         super().leaveEvent(event)
 
     def resizeEvent(self, event):
+        """
+        Reposition the info table in the center when the widget is resized.
+        """
         super().resizeEvent(event)
         tw = self.info_table.width()
         th = self.info_table.height()
@@ -279,13 +313,11 @@ class ColorWheel(QWidget):
         self.info_table.move(x, y)
 
 
-# -------------------------------------------------------------------
-# ControlPanel
-# -------------------------------------------------------------------
 class ControlPanel(QWidget):
     """
     Control panel with +, -, and '@' (randomize) buttons.
     """
+
     def __init__(self, palette_widget, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -309,13 +341,11 @@ class ControlPanel(QWidget):
         self.setLayout(layout)
 
 
-# -------------------------------------------------------------------
-# ImageDropWidget
-# -------------------------------------------------------------------
 class ImageDropWidget(QWidget):
     """
     Widget that supports drag-and-drop image loading, or clicking to browse.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
@@ -377,9 +407,6 @@ class ImageDropWidget(QWidget):
         super().resizeEvent(event)
 
 
-# -------------------------------------------------------------------
-# MainWindow
-# -------------------------------------------------------------------
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
