@@ -4,6 +4,7 @@ import sys
 import PySide2.QtCore as QtCore
 import PySide2.QtGui as QtGui
 import PySide2.QtWidgets as QtWidgets
+from qt_material import apply_stylesheet
 
 from image_classifier.color import Color, ColorType
 from image_classifier.controller import analyze_palette_harmony
@@ -15,6 +16,7 @@ class ColorBox(QtWidgets.QLabel):
     A color box that expands within the layout and displays the hex code
     at the bottom. Clicking copies the code to the clipboard.
     """
+
     def __init__(self, color: Color, parent=None):
         super().__init__(parent)
         self.color = color
@@ -22,7 +24,9 @@ class ColorBox(QtWidgets.QLabel):
         self.copied_timer.setSingleShot(True)
         self.copied_timer.timeout.connect(self.reset_label)
 
-        self.setAutoFillBackground(False)
+        # Enable background painting
+        self.setAutoFillBackground(True)
+
         self.set_alignment_and_margins()
         self.update_appearance()
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
@@ -32,16 +36,23 @@ class ColorBox(QtWidgets.QLabel):
         self.setContentsMargins(0, 0, 0, 5)
 
     def update_appearance(self):
-        hex_code = self.color.hex
-        self.setStyleSheet(f"""
-            QLabel {{
-                background-color: {hex_code};
-                color: white;
-                border: none;
-            }}
-        """)
+        # Prepare a QPalette instead of a style sheet
+        palette = self.palette()
+        # Convert the color to a QtGui.QColor
+        qcolor = QtGui.QColor(*self.color.rgb)  # self.color.rgb is (r,g,b)
+
+        # Set the background color to our color
+        palette.setColor(QtGui.QPalette.Window, qcolor)
+        # Set the text color to white
+        palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+
+        self.setPalette(palette)
+        self.setBackgroundRole(QtGui.QPalette.Window)
+        self.setForegroundRole(QtGui.QPalette.WindowText)
+
+        # If we are not currently showing "Copied!", show the hex code text
         if not self.copied_timer.isActive():
-            self.setText(hex_code.upper())
+            self.setText(self.color.hex.upper())
 
     def mousePressEvent(self, event):
         QtGui.QGuiApplication.clipboard().setText(self.color.hex.upper())
@@ -228,18 +239,8 @@ class ColorWheel(QtWidgets.QWidget):
         self.info_table.horizontalHeader().setVisible(False)
         self.info_table.verticalHeader().setVisible(False)
 
-        self.info_table.setStyleSheet("""
-            QTableWidget {
-                background-color: rgba(0, 0, 0, 140);
-                border: none;
-                color: white;
-                padding: 5px;
-            }
-            QTableWidget::item {
-                margin: 0px;
-                padding: 0px;
-            }
-        """)
+        # Remove the style sheet usage; instead use a palette for background color
+        self.set_table_translucent_background()
 
         self.info_table.setFixedSize(300, 200)
         self.info_table.setRowCount(8)
@@ -255,6 +256,21 @@ class ColorWheel(QtWidgets.QWidget):
         # Pre-generate a large wheel image for performance
         self.base_wheel_size = 1024
         self.wheel_image = self.generate_wheel_image(self.base_wheel_size)
+
+    def set_table_translucent_background(self):
+        """
+        Use QPalette to give the table a semi-transparent background
+        and white text, instead of using style sheets.
+        """
+        table_palette = self.info_table.palette()
+
+        # A semi-transparent black
+        translucent_black = QtGui.QColor(0, 0, 0, 140)
+        table_palette.setColor(QtGui.QPalette.Base, translucent_black)
+        table_palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
+
+        self.info_table.setPalette(table_palette)
+        # Use the 'Base' color for the background, 'Text' color for text
 
     def generate_wheel_image(self, diameter):
         """
@@ -420,7 +436,12 @@ class ImageDropWidget(QtWidgets.QWidget):
 
         self.label = QtWidgets.QLabel("Drop Image Here\nor\nClick to Browse")
         self.label.setAlignment(QtCore.Qt.AlignCenter)
-        self.label.setStyleSheet("border: 2px dashed gray;")
+
+        # We leave the dashed border alone or remove it; if removing, do:
+        # self.label.setFrameStyle(QtWidgets.QFrame.Box | QtWidgets.QFrame.Plain)
+        # For a dashed border, you'd typically need a style sheet or custom painting.
+        # If you truly want to remove the style sheet approach, you can skip the dashed look.
+
         self.layout.addWidget(self.label, stretch=1)
 
         self.browse_button = QtWidgets.QPushButton("Drop image here or Click to browse")
@@ -445,8 +466,6 @@ class ImageDropWidget(QtWidgets.QWidget):
             self.label.setPixmap(
                 pixmap.scaled(self.label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
             )
-            self.label.setStyleSheet("")
-            self.label.setText("")
 
         self.image_selected.emit(path)
 
@@ -531,5 +550,6 @@ class MainWindow(QtWidgets.QMainWindow):
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
+    #apply_stylesheet(app, theme='dark_teal.xml')
     window.show()
     sys.exit(app.exec_())
