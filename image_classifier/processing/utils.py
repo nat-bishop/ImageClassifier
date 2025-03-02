@@ -1,7 +1,8 @@
-import numpy as np
-import cv2
 import logging
 import math
+
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

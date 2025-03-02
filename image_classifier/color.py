@@ -1,8 +1,8 @@
-import math
-import cv2
 import colorsys
-import numpy as np
 from enum import Enum
+
+import cv2
+import numpy as np
 
 ColorTuple = tuple[int, int, int]
 

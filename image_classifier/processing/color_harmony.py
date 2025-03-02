@@ -1,7 +1,7 @@
-import math
 import logging
+import math
 
-from image_classifier.color.color import Color
+from image_classifier.color import Color
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)

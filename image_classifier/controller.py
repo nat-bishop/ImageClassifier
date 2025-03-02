@@ -1,14 +1,15 @@
 import logging
 from pathlib import Path
-from image_classifier.classifiers.base_classifier import ClassifierType, ColorClassifier
-from image_classifier.classifiers.k_means import KMeansColorClassifier
+
+from image_classifier.classifiers.base_classifier import ClassifierType
 from image_classifier.classifiers.guassian_mixture import GMMColorClassifier
+from image_classifier.classifiers.k_means import KMeansColorClassifier
 from image_classifier.classifiers.median_cut import MedianCutColorClassifier
+from image_classifier.color import Color
 from image_classifier.processing.color_harmony import score_triadic, score_analogous, score_square, score_complementary, \
     score_split_complementary, score_monochromatic, score_contrast_absolute, score_saturation_absolute
 from image_classifier.processing.color_sorting import sort_by_lab
 from image_classifier.processing.image_processor import ImageProcessor
-from image_classifier.color.color import Color
 
 logger = logging.getLogger(__name__)
 

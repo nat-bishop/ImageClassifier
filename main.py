@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from image_classifier.classifiers.base_classifier import ClassifierType
 from image_classifier.ui.ui import display_multiple_classifiers
-from image_classifier.controllers.controller import create_palette, analyze_palette_harmony
+from image_classifier.controller import create_palette, analyze_palette_harmony
 import logging
 
 

@@ -1,6 +1,6 @@
-from collections.abc import Sequence
 import logging
-from image_classifier.color.color import Color
+
+from image_classifier.color import Color
 
 logger = logging.getLogger(__name__)
 

@@ -2,10 +2,9 @@ import logging
 
 import numpy as np
 from sklearn.mixture import GaussianMixture
-from image_classifier.color.color import Color, ColorType
 
 from image_classifier.classifiers.base_classifier import ColorClassifier
-
+from image_classifier.color import Color, ColorType
 
 logger = logging.getLogger(__name__)
 

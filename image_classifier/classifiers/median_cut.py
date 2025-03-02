@@ -1,11 +1,10 @@
 import logging
 
-from PIL import Image
 import numpy as np
-from image_classifier.color.color import Color, ColorType
+from PIL import Image
 
 from image_classifier.classifiers.base_classifier import ColorClassifier
-
+from image_classifier.color import Color, ColorType
 
 logger = logging.getLogger(__name__)
 
