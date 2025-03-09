@@ -1,15 +1,23 @@
+from __future__ import annotations
+
+import logging
 import math
 import sys
+
+from image_classifier.preferences import load_preferences, store_preferences
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.getLogger().setLevel(logging.WARNING)
 
 import PySide2.QtCore as QtCore
 import PySide2.QtGui as QtGui
 import PySide2.QtWidgets as QtWidgets
-# from qt_material import apply_stylesheet
+import qt_themes
+from qt_material_icons import MaterialIcon
 
 from image_classifier.color import Color, ColorType
 from image_classifier.controller import analyze_palette_harmony
 from image_classifier.ui.background_process import ColorGenerationThread
-
 
 ########################################################
 # ImageDropWidget (Fills most of the window)
@@ -17,30 +25,41 @@ from image_classifier.ui.background_process import ColorGenerationThread
 class ImageDropWidget(QtWidgets.QLabel):
     image_selected = QtCore.Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
         # Ignore the pixmap’s default size; label can shrink below it
         self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
 
         self.setAcceptDrops(True)
         self.setAlignment(QtCore.Qt.AlignCenter)
-        self.setText("Drop Image Here or Click to Browse")
-        self.setStyleSheet("border: 2px dashed gray;")
+        self.icon_pixmap = MaterialIcon("place_item").pixmap(QtCore.QSize(75, 75))
 
         self._original_pixmap = QtGui.QPixmap()
+        self.show_border = True  # Initially show the border
+        logging.info('initializing ImageDropWidget')
 
-    def load_image(self, path):
+        # Show pointing-hand cursor on hover
+        self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.update_icon()
+
+    def update_icon(self) -> None:
+        if not self.icon_pixmap.isNull():
+            self.setPixmap(self.icon_pixmap)
+        else:
+            logging.warning("Icon failed to load.")
+
+    def load_image(self, path: str) -> None:
         pixmap = QtGui.QPixmap(path)
         if not pixmap.isNull():
             self._original_pixmap = pixmap
             self._update_displayed_pixmap()
-            # remove dashed border once loaded
-            self.setStyleSheet("")
-            self.setText("")
+            self.show_border = False  # Hide border when an image is loaded
+            self.update()
+
         self.image_selected.emit(path)
 
-    def _update_displayed_pixmap(self):
-        """Manually scale from the original pixmap to fit current label size."""
+    def _update_displayed_pixmap(self) -> None:
         if not self._original_pixmap.isNull():
             scaled = self._original_pixmap.scaled(
                 self.size(),
@@ -49,85 +68,125 @@ class ImageDropWidget(QtWidgets.QLabel):
             )
             self.setPixmap(scaled)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_displayed_pixmap()
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event) -> None:
         urls = event.mimeData().urls()
         if urls:
+            logging.info(f"dropped image: {urls}")
             file_path = urls[0].toLocalFile()
             self.load_image(file_path)
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event) -> None:
         # Let user browse for image
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open Image", "",
             "Images (*.png *.jpg *.jpeg *.bmp)"
         )
         if file_path:
+            logging.info(f'selected image at filepath: {file_path}')
             self.load_image(file_path)
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        super().paintEvent(event)
+        if self.show_border:
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing)
+
+            # Dashed border
+            pen = QtGui.QPen(QtGui.QColor(150, 150, 150))
+            pen.setStyle(QtCore.Qt.DashLine)
+            pen.setWidth(2)
+            painter.setPen(pen)
+
+            rect = self.rect().adjusted(6, 6, -6, -6)
+            painter.drawRect(rect)
+
+    def set_border_visibility(self, visible: bool) -> None:
+        logging.debug(f'changing border visibility to: {visible}')
+        self.show_border = visible
+        self.update()
 
 
 ########################################################
-# ColorBox & ColorPalette (Bottom section)
+# ColorBox
 ########################################################
 class ColorBox(QtWidgets.QLabel):
     """
-    A color box that expands within the layout and displays the hex code
-    at the bottom. Clicking copies the code to the clipboard.
+    A color box that displays its background color.
+    Clicking on the box opens a QColorDialog to pick a new color.
+    That updates the parent's palette, color wheel, and color harmony.
     """
 
-    def __init__(self, color: Color, parent=None):
+    def __init__(
+        self,
+        color: Color,
+        index: int,
+        palette_widget: ColorPalette,
+        parent: QtWidgets.QWidget = None
+    ) -> None:
         super().__init__(parent)
         self.color = color
-        self.copied_timer = QtCore.QTimer(self)
-        self.copied_timer.setSingleShot(True)
-        self.copied_timer.timeout.connect(self.reset_label)
-
-        # Enable background painting
+        self.index = index
+        self.palette_widget = palette_widget
         self.setAutoFillBackground(True)
-        self.setAlignment(QtCore.Qt.AlignBottom | QtCore.Qt.AlignHCenter)
-        self.setContentsMargins(0, 0, 0, 5)
-        self.update_appearance()
+        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setContentsMargins(0, 0, 0, 0)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
-    def update_appearance(self):
-        # Use QPalette for background color
+        # Show pointing-hand cursor on hover
+        self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        self.update_appearance()
+        self.setToolTip("Click to pick a new color")
+
+    def update_appearance(self) -> None:
         palette = self.palette()
         qcolor = QtGui.QColor(*self.color.rgb)
         palette.setColor(QtGui.QPalette.Window, qcolor)
-        # White text by default
+        # White text by default if we decide to display text
         palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
 
         self.setPalette(palette)
         self.setBackgroundRole(QtGui.QPalette.Window)
         self.setForegroundRole(QtGui.QPalette.WindowText)
 
-        if not self.copied_timer.isActive():
-            self.setText(self.color.hex.upper())
-
-    def mousePressEvent(self, event):
-        # Copy the hex to clipboard
-        QtGui.QGuiApplication.clipboard().setText(self.color.hex.upper())
-        self.setText("Copied!")
-        self.copied_timer.start(1000)
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.LeftButton:
+            initial = QtGui.QColor(*self.color.rgb)
+            chosen = QtWidgets.QColorDialog.getColor(
+                initial=initial,
+                parent=self,
+                title="Select a Color"
+            )
+            if chosen.isValid():
+                new_color = Color((chosen.red(), chosen.green(), chosen.blue()), ColorType.RGB)
+                self.color = new_color
+                self.update_appearance()
+                self.palette_widget.colors[self.index] = new_color
+                self.palette_widget.update_colors()
+                if self.palette_widget.color_wheel:
+                    self.palette_widget.color_wheel.repaint()
+                if self.palette_widget.color_harmony:
+                    self.palette_widget.color_harmony.update_harmony()
         super().mousePressEvent(event)
 
-    def reset_label(self):
-        self.update_appearance()
 
-
+########################################################
+# ColorPalette
+########################################################
 class ColorPalette(QtWidgets.QWidget):
     """
     Horizontally displayed color palette beneath the image.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
         self.layout = QtWidgets.QHBoxLayout(self)
         self.layout.setSpacing(0)
@@ -135,27 +194,24 @@ class ColorPalette(QtWidgets.QWidget):
         self.setLayout(self.layout)
         self.setMinimumHeight(120)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        logging.info('initializing ColorPalette widget')
 
-        # Current visible colors
+        # Show pointing-hand cursor for the entire palette
+        self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
         self.colors = []
-        # All generated colors from background
         self.generated_colors = []
         self.image_path = None
-
-        # references to color wheel & color harmony
         self.color_wheel = None
         self.color_harmony = None
 
-        # Progress label: stays in the layout permanently
-        self.loading_label = QtWidgets.QLabel("Processing...")
-        self.loading_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.loading_label.hide()
-        self.layout.addWidget(self.loading_label)
-
+        self.progress_timer = QtCore.QTimer(self)
+        self.progress_timer.timeout.connect(self.update_progress)
+        self.progress_index = 0
         self.color_thread = None
         self.set_default_colors()
 
-    def set_default_colors(self):
+    def set_default_colors(self) -> None:
         default_colors = [
             Color((252, 231, 200), ColorType.RGB),
             Color((177, 194, 158), ColorType.RGB),
@@ -165,69 +221,98 @@ class ColorPalette(QtWidgets.QWidget):
         self.colors = default_colors[:]
         self.generated_colors = default_colors[:]
         self.update_colors()
+        logging.info('Set default colors for color palette')
 
-    def set_image_path(self, image_path: str):
+    def set_image_path(self, image_path: str) -> None:
         self.image_path = image_path
         self.generate_colors()
 
-    def set_color_wheel(self, color_wheel):
+    def set_color_wheel(self, color_wheel: 'ColorWheel') -> None:
         self.color_wheel = color_wheel
 
-    def set_color_harmony(self, color_harmony):
+    def set_color_harmony(self, color_harmony: 'ColorHarmony') -> None:
         self.color_harmony = color_harmony
 
-    def generate_colors(self):
+    def generate_colors(self) -> None:
         if not self.image_path:
+            logging.warning('No image path when generating colors')
             return
-        self.loading_label.show()
+
         self.clear_colors_except_label()
+        self.start_progress_animation()
+        logging.info('Starting color generation')
 
         self.color_thread = ColorGenerationThread(self.image_path, num_colors=9)
         self.color_thread.colors_generated.connect(self.on_colors_generated)
         self.color_thread.start()
 
-    def on_colors_generated(self, colors):
-        if not colors:
-            return
-        self.generated_colors = colors
-        # Only show as many colors as before
-        self.colors = colors[:len(self.colors)]
-        self.loading_label.hide()
+    def start_progress_animation(self) -> None:
+        self.progress_index = 0
+        self.progress_timer.start(200)
+        theme_bg_color = self.palette().color(QtGui.QPalette.Window)
+        self.colors = [Color((theme_bg_color.red(), theme_bg_color.green(), theme_bg_color.blue()), ColorType.RGB)
+                       for _ in range(len(self.colors))]
         self.update_colors()
 
-        # Update color wheel and color harmony
+    def update_progress(self) -> None:
+        if self.progress_index >= len(self.colors):
+            self.progress_index = 0
+
+        theme_bg_color = self.palette().color(QtGui.QPalette.Window)
+        theme_progress_color = theme_bg_color.lighter(120)
+        self.colors = [Color((theme_bg_color.red(), theme_bg_color.green(), theme_bg_color.blue()), ColorType.RGB)
+                       for _ in range(len(self.colors))]
+
+        if self.progress_index < len(self.colors):
+            self.colors[self.progress_index] = Color(
+                (theme_progress_color.red(), theme_progress_color.green(), theme_progress_color.blue()),
+                ColorType.RGB
+            )
+        self.update_colors()
+        self.progress_index += 1
+
+    def on_colors_generated(self, colors: list[Color]) -> None:
+        self.progress_timer.stop()
+        if not colors:
+            return
+        logging.info('completed color generation, stopping progress animation and updating colors.')
+        self.generated_colors = colors
+        self.colors = colors[: len(self.colors)]
+        self.update_colors()
         if self.color_wheel:
             self.color_wheel.update()
             self.color_wheel.repaint()
-
         if self.color_harmony:
             self.color_harmony.update_harmony()
 
-    def clear_colors_except_label(self):
+    def clear_colors_except_label(self) -> None:
+        logging.info('clearing colors from color palette')
         for i in reversed(range(self.layout.count())):
             item = self.layout.itemAt(i)
             widget = item.widget()
-            if widget is self.loading_label:
-                continue
-            self.layout.takeAt(i).widget().deleteLater()
+            if widget:
+                widget.deleteLater()
 
-    def update_colors(self):
+    def update_colors(self) -> None:
         self.clear_colors_except_label()
-        for c in self.colors:
-            box = ColorBox(c)
+        logging.info('updating colors')
+        for i, c in enumerate(self.colors):
+            box = ColorBox(c, i, self, parent=self)
             self.layout.addWidget(box)
 
-    def add_color(self):
+    def add_color(self) -> None:
         if len(self.colors) < len(self.generated_colors):
             self.colors.append(self.generated_colors[len(self.colors)])
             self.update_colors()
+            logging.info(f'adding color: {self.generated_colors[len(self.colors)]} to color palette')
             if self.color_wheel:
                 self.color_wheel.repaint()
             if self.color_harmony:
                 self.color_harmony.update_harmony()
 
-    def remove_color(self):
+    def remove_color(self) -> None:
         if self.colors:
+            logging.info(f'removing color: {self.colors[-1]} from color palette')
             self.colors.pop()
             self.update_colors()
             if self.color_wheel:
@@ -245,19 +330,21 @@ class ColorWheel(QtWidgets.QWidget):
     A hue–saturation wheel at full brightness.
     """
 
-    def __init__(self, palette_widget, parent=None):
+    def __init__(self, palette_widget: ColorPalette, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
+        logging.info('initializing ColorWheel widget')
         self.palette_widget = palette_widget
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        self.setMinimumHeight(300)
+        self.setMinimumHeight(200)
 
         self.base_wheel_size = 1024
         self.wheel_image = self.generate_wheel_image(self.base_wheel_size)
 
-    def generate_wheel_image(self, diameter):
+    def generate_wheel_image(self, diameter: int):
+        logging.info('generating wheel image')
         image = QtGui.QImage(diameter, diameter, QtGui.QImage.Format_RGB32)
         image.fill(QtCore.Qt.black)
         radius = diameter / 2.0
@@ -277,7 +364,7 @@ class ColorWheel(QtWidgets.QWidget):
                     image.setPixel(x, y, bg_pixel)
         return image
 
-    def paintEvent(self, event):
+    def paintEvent(self, event) -> None:
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
 
@@ -302,105 +389,130 @@ class ColorWheel(QtWidgets.QWidget):
                 sat_f = sat / 255.0
                 px = top_left_x + radius + math.cos(hue_rad) * sat_f * radius
                 py = top_left_y + radius - math.sin(hue_rad) * sat_f * radius
-                dot_radius = 18
-                pen = QtGui.QPen(QtCore.Qt.white, 4)
+                dot_radius = 12
+                pen = QtGui.QPen(QtCore.Qt.white, 2)
                 painter.setPen(pen)
                 painter.setBrush(QtGui.QColor(*color_obj.rgb))
                 painter.drawEllipse(QtCore.QPointF(px, py), dot_radius, dot_radius)
         painter.end()
 
 
-class ColorHarmony(QtWidgets.QTableWidget):
+class ColorHarmony(QtWidgets.QWidget):
     """
-    Displays color harmony info side-by-side with the color wheel.
+    Displays color harmony info as 8 read-only sliders side-by-side
+    with the color wheel.
     """
-    def __init__(self, palette_widget, parent=None):
+    def __init__(self, palette_widget: ColorPalette, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
+        logging.info('initializing ColorHarmony widget')
         self.palette_widget = palette_widget
-        self.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        self.setShowGrid(False)
-        self.setFrameStyle(0)
-        self.setRowCount(8)
-        self.setColumnCount(2)
 
-        # Hide headers
-        self.horizontalHeader().setVisible(False)
-        self.verticalHeader().setVisible(False)
+        # We'll fix width=200, height=230 as before
+        self.setFixedSize(200, 230)
 
-        self.verticalHeader().setDefaultSectionSize(1)
+        # Build a vertical layout with up to 8 lines:
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        self.setLayout(main_layout)
 
-        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.rows = []
+        for _ in range(8):
+            row_widget = QtWidgets.QWidget()
+            row_layout = QtWidgets.QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
 
-        self.setFixedSize(230, 300)
+            # We fix the label's width so all sliders end up same length
+            label = QtWidgets.QLabel("")
+            label.setFixedWidth(70)  # adjust if needed
+            label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
 
-        # Initialize placeholders
-        for r in range(8):
-            self.setItem(r, 0, QtWidgets.QTableWidgetItem(""))
-            self.setItem(r, 1, QtWidgets.QTableWidgetItem(""))
+            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider.setRange(0, 100)
+            slider.setValue(0)
+            slider.setEnabled(False)  # read-only slider
+            slider.setFixedHeight(16) # visually smaller
+            # The slider automatically becomes the same length since the row has a fixed total width of 200,
+            # minus the label’s 70 px plus some margins.
 
-    def update_harmony(self):
+            row_layout.addWidget(label)
+            row_layout.addWidget(slider, 1)  # 'stretch=1' ensures the slider takes leftover space
+            row_widget.setLayout(row_layout)
+
+            self.rows.append((label, slider))
+            main_layout.addWidget(row_widget)
+
+    def update_harmony(self) -> None:
+        logging.info('updating color harmonies as sliders')
         color_harmony = analyze_palette_harmony(self.palette_widget.colors)
-        row = 0
-        for cat, val in color_harmony.items():
-            if row < self.rowCount():
-                percent = f"{val:.2f}"
-                self.setItem(row, 0, QtWidgets.QTableWidgetItem(cat))
-                self.setItem(row, 1, QtWidgets.QTableWidgetItem(percent))
-            row += 1
-        # Clear remaining rows
-        while row < self.rowCount():
-            self.setItem(row, 0, QtWidgets.QTableWidgetItem(""))
-            self.setItem(row, 1, QtWidgets.QTableWidgetItem(""))
-            row += 1
+        items = list(color_harmony.items())
+
+        for i in range(8):
+            if i < len(items):
+                cat, val = items[i]
+                slider_percent = int(val * 100)  # if val is [0..1]
+                self.rows[i][0].setText(cat)
+                self.rows[i][1].setValue(slider_percent)
+            else:
+                self.rows[i][0].setText("")
+                self.rows[i][1].setValue(0)
 
 
 class ControlPanel(QtWidgets.QWidget):
-    """
-    Simple control panel for generating colors or adding/removing them.
-    """
-    def __init__(self, palette_widget, parent=None):
+    def __init__(self, palette_widget: ColorPalette, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
+        logging.info('initializing ControlPanel widget')
         self.palette_widget = palette_widget
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        btn_refresh = QtWidgets.QPushButton("@")
+        btn_refresh = QtWidgets.QPushButton()
+        btn_refresh.setIcon(MaterialIcon('autorenew'))
         btn_refresh.setFixedSize(40, 40)
         btn_refresh.clicked.connect(self.palette_widget.generate_colors)
 
-        btn_add = QtWidgets.QPushButton("+")
+        btn_add = QtWidgets.QPushButton()
+        btn_add.setIcon(MaterialIcon('add'))
         btn_add.setFixedSize(40, 40)
         btn_add.clicked.connect(self.palette_widget.add_color)
 
-        btn_remove = QtWidgets.QPushButton("-")
+        btn_remove = QtWidgets.QPushButton()
+        btn_remove.setIcon(MaterialIcon('remove'))
         btn_remove.setFixedSize(40, 40)
         btn_remove.clicked.connect(self.palette_widget.remove_color)
+
+        btn_preferences = QtWidgets.QPushButton()
+        btn_preferences.setIcon(MaterialIcon('settings'))
+        btn_preferences.setFixedSize(40, 40)
+        btn_preferences.clicked.connect(self.open_preferences)
 
         layout.addWidget(btn_refresh)
         layout.addWidget(btn_add)
         layout.addWidget(btn_remove)
+        layout.addWidget(btn_preferences)
         layout.addStretch()
         self.setLayout(layout)
 
+    def open_preferences(self):
+        dialog = PreferencesDialog(self)
+        dialog.exec_()
+
 
 class ExpandableSection(QtWidgets.QWidget):
-    """
-    A togglable section that shows color wheel, color harmony, and control panel side by side.
-    """
-    def __init__(self, color_wheel, color_harmony, control_panel, parent=None):
+    def __init__(self, color_wheel: ColorWheel, color_harmony: ColorHarmony, control_panel: ControlPanel, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
+        logging.info('initializing ExpandableSection widget')
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(self.layout)
 
-        self.toggle_button = QtWidgets.QPushButton("▼ More Info")
+        self.toggle_button = QtWidgets.QPushButton()
+        self.toggle_button.setIcon(MaterialIcon('arrow_drop_down'))
         self.toggle_button.setCheckable(True)
         self.toggle_button.setChecked(False)
         self.toggle_button.clicked.connect(self.toggle_visibility)
-        self.layout.addWidget(self.toggle_button)
 
         self.content_widget = QtWidgets.QWidget()
         content_layout = QtWidgets.QHBoxLayout(self.content_widget)
@@ -413,31 +525,65 @@ class ExpandableSection(QtWidgets.QWidget):
         self.content_widget.setLayout(content_layout)
         self.content_widget.setVisible(False)
         self.layout.addWidget(self.content_widget)
+        self.layout.addWidget(self.toggle_button)
 
         self.color_harmony = color_harmony
 
-    def toggle_visibility(self):
+    def toggle_visibility(self) -> None:
         is_expanded = self.toggle_button.isChecked()
+        logging.info('toggling visibility of expandable section.')
         self.content_widget.setVisible(is_expanded)
-        self.toggle_button.setText("▲ Less Info" if is_expanded else "▼ More Info")
-
-        # If expanded, update the harmony table
+        self.toggle_button.setIcon(MaterialIcon('arrow_drop_up') if is_expanded else MaterialIcon('arrow_drop_down'))
         if is_expanded:
             self.color_harmony.update_harmony()
+
+
+class PreferencesDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Preferences")
+        self.setModal(True)
+        self.layout = QtWidgets.QVBoxLayout(self)
+
+        self.num_colors_label = QtWidgets.QLabel("Number of Colors:")
+        self.num_colors_spinbox = QtWidgets.QSpinBox()
+        self.num_colors_spinbox.setRange(1, 20)
+
+        self.classifier_label = QtWidgets.QLabel("Classifier:")
+        self.classifier_combobox = QtWidgets.QComboBox()
+        self.classifier_combobox.addItems(["KMeans", "GaussianMixture", "MedianCut"])
+
+        self.save_button = QtWidgets.QPushButton("Save Preferences")
+        self.save_button.clicked.connect(self.save_preferences)
+
+        self.layout.addWidget(self.num_colors_label)
+        self.layout.addWidget(self.num_colors_spinbox)
+        self.layout.addWidget(self.classifier_label)
+        self.layout.addWidget(self.classifier_combobox)
+        self.layout.addWidget(self.save_button)
+
+        self.load_preferences()
+
+    def load_preferences(self):
+        preferences = load_preferences()
+        self.num_colors_spinbox.setValue(preferences.get("num_colors", 9))
+        self.classifier_combobox.setCurrentText(preferences.get("classifier", "KMeans"))
+
+    def save_preferences(self):
+        preferences = {
+            "num_colors": self.num_colors_spinbox.value(),
+            "classifier": self.classifier_combobox.currentText(),
+        }
+        store_preferences(preferences)
+        logging.info(f"Saved preferences: {preferences}")
+        self.accept()
 
 
 ########################################################
 # MainWindow
 ########################################################
 class MainWindow(QtWidgets.QMainWindow):
-    """
-    Redesigned UI:
-      1) Large image at the top
-      2) Color palette at the bottom, slightly taller
-      3) Expandable section to show color wheel, color harmony, control panel
-    """
-
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setGeometry(100, 100, 1000, 600)
         self.setWindowTitle("Palette Generator")
@@ -474,7 +620,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
-    # apply_stylesheet(app, theme='dark_teal.xml')  # optional
+    qt_themes.set_theme('one_dark_two')
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
