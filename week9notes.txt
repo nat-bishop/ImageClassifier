@@ -1,0 +1,29 @@
+Move the app running stuff from main to testgui for tests
+
+put the bottom info bar on side. Group color harmony and color wheel.(make it all the way down). Have a button on the left that closes and opens.
+
+maybe put + - buttons at bottom right next to palette.
+
+check photos for UI
+
+Make faster.
+
+Try backing background black
+
+Make clicking on image not open new image. Maybei t should have color informaiton instead?
+
+Maybe use qt-extensions viewer.py. Then i can have color information on the image itself. Copy viewer.py to my drive and then check tests to see how it works
+
+instead of list use sequence for type hints.
+
+logging fixes. take all logging out of it. put that in main file only
+
+color palette is used in every class -> probablky shouldnt be coupled like this. maybe use signals instead?
+
+expandable section has no reason to require all the exrta shit (see picture to see better way to do it)
+
+Maybe check qt-parameters for collapasble widget?
+
+use QtPy to handle pyside2/pyside6 dependencys
+
+I dont need the classifier map to the enum. i can just put the function inside the enum.

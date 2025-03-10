@@ -1,0 +1,29 @@
+Version 11.0 v1
+begin_group
+ name MyPaletteExtractor
+ inputs 1  # Ensure we accept one input
+
+ #-------------------------------------------------------------
+ #    1) Some user knobs to control the extraction
+ #-------------------------------------------------------------
+ addUserKnob {20  _extractorTitle l "Palette Extraction"}
+ addUserKnob {3 num_colors l "Number of Colors" R 1 20 default 5}
+ addUserKnob {26 classifier_type l "Classifier" T "KMeans GaussianMixture MedianCut" default "KMeans"}
+
+ #-------------------------------------------------------------
+ #    2) Knobs to display extracted colors
+ #-------------------------------------------------------------
+ addUserKnob {20 _paletteTitle l "Extracted Colors"}
+ addUserKnob {3 color1 l "Color 1"}
+ addUserKnob {3 color2 l "Color 2"}
+ addUserKnob {3 color3 l "Color 3"}
+ addUserKnob {3 color4 l "Color 4"}
+ addUserKnob {3 color5 l "Color 5"}
+
+ #-------------------------------------------------------------
+ #    3) A button to run the extraction script
+ #-------------------------------------------------------------
+ addUserKnob {6 generatePalette l "Generate Palette" -command "import image_classifier.nuke; image_classifier.nuke.generate_palette(nuke.thisNode())"}
+
+# End of group
+end_group
