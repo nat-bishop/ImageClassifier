@@ -55,6 +55,8 @@ class ImageDropWidget(QtWidgets.QLabel):
             self._original_pixmap = pixmap
             self._update_displayed_pixmap()
             self.show_border = False  # Hide border when an image is loaded
+            self.setStyleSheet("background-color: black;")
+
             self.update()
 
         self.image_selected.emit(path)

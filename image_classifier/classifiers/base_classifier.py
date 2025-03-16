@@ -17,6 +17,6 @@ class ClassifierType(Enum):
 
 class ColorClassifier(ABC):
     @abstractmethod
-    def extract_colors(self, image: np.ndarray, num_colors: int) -> list[Color]:
+    def extract_colors(self, image: np.ndarray, num_colors: int, num_samples: int = 50000) -> list[Color]:
         """Extracts dominant colors from an image."""
         pass

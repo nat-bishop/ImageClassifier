@@ -1,29 +1,27 @@
-Version 11.0 v1
-begin_group
- name MyPaletteExtractor
- inputs 1  # Ensure we accept one input
-
- #-------------------------------------------------------------
- #    1) Some user knobs to control the extraction
- #-------------------------------------------------------------
- addUserKnob {20  _extractorTitle l "Palette Extraction"}
- addUserKnob {3 num_colors l "Number of Colors" R 1 20 default 5}
- addUserKnob {26 classifier_type l "Classifier" T "KMeans GaussianMixture MedianCut" default "KMeans"}
-
- #-------------------------------------------------------------
- #    2) Knobs to display extracted colors
- #-------------------------------------------------------------
- addUserKnob {20 _paletteTitle l "Extracted Colors"}
- addUserKnob {3 color1 l "Color 1"}
- addUserKnob {3 color2 l "Color 2"}
- addUserKnob {3 color3 l "Color 3"}
- addUserKnob {3 color4 l "Color 4"}
- addUserKnob {3 color5 l "Color 5"}
-
- #-------------------------------------------------------------
- #    3) A button to run the extraction script
- #-------------------------------------------------------------
- addUserKnob {6 generatePalette l "Generate Palette" -command "import image_classifier.nuke; image_classifier.nuke.generate_palette(nuke.thisNode())"}
-
-# End of group
+Group {
+ name PalatteGenerator
+ addUserKnob {20 PalatteGenerator}
+ addUserKnob {3 numcolors l "Number of Colors"}
+ addUserKnob {4 Classifier M {"Guassian Mixture" K-Means "Median Cut"}}
+ addUserKnob {22 Generate T "import image_classifier.nuke\nimage_classifier.nuke.generate_palette(nuke.thisNode())" +STARTLINE}
+}
+ Input {
+  inputs 0
+  name Input1
+  xpos 364
+  ypos -186
+ }
+ Write {
+  name Write1
+  file C:/palette_tmp.png
+  file_type png
+  xpos 364
+  ypos -121
+ }
+ Output {
+  name Output1
+  selected true
+  xpos 362
+  ypos 130
+ }
 end_group
