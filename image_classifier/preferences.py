@@ -1,20 +1,47 @@
 import json
 import logging
 import os
+from pathlib import Path
 
-PREFERENCES_PATH = os.path.expanduser('~/preferences.json')
+# Store preferences in the user's home directory under .image_classifier
+PREFERENCES_DIR = os.path.expanduser('~/.image_classifier')
+PREFERENCES_PATH = os.path.join(PREFERENCES_DIR, 'preferences.json')
+
+# Default preferences
+DEFAULT_PREFERENCES = {
+    "num_colors": 5,
+    "classifier": "GaussianMixture"
+}
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 def store_preferences(data: dict) -> None:
-    with open(PREFERENCES_PATH, 'w') as f:
-        logging.info(f"storeing preferences at: {PREFERENCES_PATH}")
-        json.dump(data, f)
+    """Store preferences to disk, creating the directory if it doesn't exist."""
+    try:
+        # Create the preferences directory if it doesn't exist
+        os.makedirs(PREFERENCES_DIR, exist_ok=True)
+        
+        with open(PREFERENCES_PATH, 'w') as f:
+            logging.info(f"Storing preferences at: {PREFERENCES_PATH}")
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        logging.error(f"Failed to store preferences: {e}")
+
 
 def load_preferences() -> dict:
-    if os.path.exists(PREFERENCES_PATH):
-        with open(PREFERENCES_PATH, 'r') as f:
-            logging.info(f'succesfully loaded preferences from {PREFERENCES_PATH}')
-            return json.load(f)
-    logging.info('didnt find preferences, loading defaults')
-    return {"num_colors": 9, "classifier": "KMeans"}
+    """Load preferences from disk, returning defaults if no file exists or on error."""
+    try:
+        if os.path.exists(PREFERENCES_PATH):
+            with open(PREFERENCES_PATH, 'r') as f:
+                preferences = json.load(f)
+                # Validate and merge with defaults
+                validated_preferences = DEFAULT_PREFERENCES.copy()
+                validated_preferences.update(preferences)
+                logging.info(f'Successfully loaded preferences from {PREFERENCES_PATH}')
+                return validated_preferences
+    except Exception as e:
+        logging.error(f"Failed to load preferences: {e}")
+    
+    logging.info('Using default preferences')
+    return DEFAULT_PREFERENCES.copy()

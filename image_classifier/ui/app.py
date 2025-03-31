@@ -27,7 +27,7 @@ class ImageDropWidget(QtWidgets.QLabel):
 
     def __init__(self, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
-        # Ignore the pixmap’s default size; label can shrink below it
+        # Ignore the pixmap's default size; label can shrink below it
         self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
 
         self.setAcceptDrops(True)
@@ -206,6 +206,8 @@ class ColorPalette(QtWidgets.QWidget):
         self.image_path = None
         self.color_wheel = None
         self.color_harmony = None
+        self.preferences = load_preferences()  # Load preferences
+        self.current_num_colors = self.preferences.get("num_colors", 5)  # Track current number of colors
 
         self.progress_timer = QtCore.QTimer(self)
         self.progress_timer.timeout.connect(self.update_progress)
@@ -214,16 +216,23 @@ class ColorPalette(QtWidgets.QWidget):
         self.set_default_colors()
 
     def set_default_colors(self) -> None:
-        default_colors = [
-            Color((252, 231, 200), ColorType.RGB),
-            Color((177, 194, 158), ColorType.RGB),
-            Color((250, 218, 122), ColorType.RGB),
-            Color((240, 160, 75), ColorType.RGB),
+        # Store all default colors
+        self.generated_colors = [
+            Color((252, 231, 200), ColorType.RGB),  # Warm beige
+            Color((177, 194, 158), ColorType.RGB),  # Sage green
+            Color((250, 218, 122), ColorType.RGB),  # Soft yellow
+            Color((240, 160, 75), ColorType.RGB),   # Warm orange
+            Color((200, 180, 220), ColorType.RGB),  # Soft purple
+            Color((150, 200, 255), ColorType.RGB),  # Light blue
+            Color((255, 150, 150), ColorType.RGB),  # Soft pink
+            Color((180, 220, 180), ColorType.RGB),  # Mint green
+            Color((255, 200, 150), ColorType.RGB),  # Peach
         ]
-        self.colors = default_colors[:]
-        self.generated_colors = default_colors[:]
+        
+        # Show the current number of colors
+        self.colors = self.generated_colors[:self.current_num_colors]
         self.update_colors()
-        logging.info('Set default colors for color palette')
+        logging.info(f'Set default colors for color palette with {self.current_num_colors} colors')
 
     def set_image_path(self, image_path: str) -> None:
         self.image_path = image_path
@@ -244,6 +253,7 @@ class ColorPalette(QtWidgets.QWidget):
         self.start_progress_animation()
         logging.info('Starting color generation')
 
+        # Always generate 9 colors, but only display the number from preferences
         self.color_thread = ColorGenerationThread(self.image_path, num_colors=9)
         self.color_thread.colors_generated.connect(self.on_colors_generated)
         self.color_thread.start()
@@ -279,7 +289,8 @@ class ColorPalette(QtWidgets.QWidget):
             return
         logging.info('completed color generation, stopping progress animation and updating colors.')
         self.generated_colors = colors
-        self.colors = colors[: len(self.colors)]
+        # Show the current number of colors
+        self.colors = colors[:self.current_num_colors]
         self.update_colors()
         if self.color_wheel:
             self.color_wheel.update()
@@ -304,6 +315,7 @@ class ColorPalette(QtWidgets.QWidget):
 
     def add_color(self) -> None:
         if len(self.colors) < len(self.generated_colors):
+            self.current_num_colors += 1  # Update the current number of colors
             self.colors.append(self.generated_colors[len(self.colors)])
             self.update_colors()
             logging.info(f'adding color: {self.generated_colors[len(self.colors)]} to color palette')
@@ -314,6 +326,7 @@ class ColorPalette(QtWidgets.QWidget):
 
     def remove_color(self) -> None:
         if self.colors:
+            self.current_num_colors -= 1  # Update the current number of colors
             logging.info(f'removing color: {self.colors[-1]} from color palette')
             self.colors.pop()
             self.update_colors()
@@ -427,7 +440,7 @@ class ColorHarmony(QtWidgets.QWidget):
 
             # We fix the label's width so all sliders end up same length
             label = QtWidgets.QLabel("")
-            label.setFixedWidth(70)  # adjust if needed
+            label.setFixedWidth(90)  # Increased from 70 to 90 to prevent text cutoff
             label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
 
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
@@ -436,7 +449,7 @@ class ColorHarmony(QtWidgets.QWidget):
             slider.setEnabled(False)  # read-only slider
             slider.setFixedHeight(16) # visually smaller
             # The slider automatically becomes the same length since the row has a fixed total width of 200,
-            # minus the label’s 70 px plus some margins.
+            # minus the label's 90 px plus some margins.
 
             row_layout.addWidget(label)
             row_layout.addWidget(slider, 1)  # 'stretch=1' ensures the slider takes leftover space
@@ -468,76 +481,11 @@ class ControlPanel(QtWidgets.QWidget):
         self.palette_widget = palette_widget
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-
-        btn_refresh = QtWidgets.QPushButton()
-        btn_refresh.setIcon(MaterialIcon('autorenew'))
-        btn_refresh.setFixedSize(40, 40)
-        btn_refresh.clicked.connect(self.palette_widget.generate_colors)
-
-        btn_add = QtWidgets.QPushButton()
-        btn_add.setIcon(MaterialIcon('add'))
-        btn_add.setFixedSize(40, 40)
-        btn_add.clicked.connect(self.palette_widget.add_color)
-
-        btn_remove = QtWidgets.QPushButton()
-        btn_remove.setIcon(MaterialIcon('remove'))
-        btn_remove.setFixedSize(40, 40)
-        btn_remove.clicked.connect(self.palette_widget.remove_color)
-
-        btn_preferences = QtWidgets.QPushButton()
-        btn_preferences.setIcon(MaterialIcon('settings'))
-        btn_preferences.setFixedSize(40, 40)
-        btn_preferences.clicked.connect(self.open_preferences)
-
-        layout.addWidget(btn_refresh)
-        layout.addWidget(btn_add)
-        layout.addWidget(btn_remove)
-        layout.addWidget(btn_preferences)
-        layout.addStretch()
         self.setLayout(layout)
 
     def open_preferences(self):
         dialog = PreferencesDialog(self)
         dialog.exec_()
-
-
-class ExpandableSection(QtWidgets.QWidget):
-    def __init__(self, color_wheel: ColorWheel, color_harmony: ColorHarmony, control_panel: ControlPanel, parent: QtWidgets.QWidget = None) -> None:
-        super().__init__(parent)
-        logging.info('initializing ExpandableSection widget')
-        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.setLayout(self.layout)
-
-        self.toggle_button = QtWidgets.QPushButton()
-        self.toggle_button.setIcon(MaterialIcon('arrow_drop_down'))
-        self.toggle_button.setCheckable(True)
-        self.toggle_button.setChecked(False)
-        self.toggle_button.clicked.connect(self.toggle_visibility)
-
-        self.content_widget = QtWidgets.QWidget()
-        content_layout = QtWidgets.QHBoxLayout(self.content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-
-        content_layout.addWidget(color_wheel, stretch=3)
-        content_layout.addWidget(color_harmony, stretch=2)
-        content_layout.addWidget(control_panel, stretch=1)
-
-        self.content_widget.setLayout(content_layout)
-        self.content_widget.setVisible(False)
-        self.layout.addWidget(self.content_widget)
-        self.layout.addWidget(self.toggle_button)
-
-        self.color_harmony = color_harmony
-
-    def toggle_visibility(self) -> None:
-        is_expanded = self.toggle_button.isChecked()
-        logging.info('toggling visibility of expandable section.')
-        self.content_widget.setVisible(is_expanded)
-        self.toggle_button.setIcon(MaterialIcon('arrow_drop_up') if is_expanded else MaterialIcon('arrow_drop_down'))
-        if is_expanded:
-            self.color_harmony.update_harmony()
 
 
 class PreferencesDialog(QtWidgets.QDialog):
@@ -547,13 +495,18 @@ class PreferencesDialog(QtWidgets.QDialog):
         self.setModal(True)
         self.layout = QtWidgets.QVBoxLayout(self)
 
+        # Load current preferences
+        self.preferences = load_preferences()
+
         self.num_colors_label = QtWidgets.QLabel("Number of Colors:")
         self.num_colors_spinbox = QtWidgets.QSpinBox()
         self.num_colors_spinbox.setRange(1, 20)
+        self.num_colors_spinbox.setValue(self.preferences["num_colors"])
 
         self.classifier_label = QtWidgets.QLabel("Classifier:")
         self.classifier_combobox = QtWidgets.QComboBox()
         self.classifier_combobox.addItems(["KMeans", "GaussianMixture", "MedianCut"])
+        self.classifier_combobox.setCurrentText(self.preferences["classifier"])
 
         self.save_button = QtWidgets.QPushButton("Save Preferences")
         self.save_button.clicked.connect(self.save_preferences)
@@ -564,20 +517,18 @@ class PreferencesDialog(QtWidgets.QDialog):
         self.layout.addWidget(self.classifier_combobox)
         self.layout.addWidget(self.save_button)
 
-        self.load_preferences()
-
-    def load_preferences(self):
-        preferences = load_preferences()
-        self.num_colors_spinbox.setValue(preferences.get("num_colors", 9))
-        self.classifier_combobox.setCurrentText(preferences.get("classifier", "KMeans"))
-
     def save_preferences(self):
-        preferences = {
+        new_preferences = {
             "num_colors": self.num_colors_spinbox.value(),
             "classifier": self.classifier_combobox.currentText(),
         }
-        store_preferences(preferences)
-        logging.info(f"Saved preferences: {preferences}")
+        store_preferences(new_preferences)
+        logging.info(f"Saved preferences: {new_preferences}")
+        
+        # Update the parent's preferences if it exists
+        if hasattr(self.parent(), 'palette_widget'):
+            self.parent().palette_widget.preferences = new_preferences
+        
         self.accept()
 
 
@@ -587,22 +538,31 @@ class PreferencesDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setGeometry(100, 100, 1000, 600)
+        self.setGeometry(100, 100, 1200, 800)  # Made window wider to accommodate right panel
         self.setWindowTitle("Palette Generator")
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
-        main_layout = QtWidgets.QVBoxLayout(central)
+        main_layout = QtWidgets.QHBoxLayout(central)  # Changed to horizontal layout
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
         central.setLayout(main_layout)
 
+        # Left side container for image and palette
+        left_container = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_container)
+        left_layout.setSpacing(0)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
         self.image_drop = ImageDropWidget()
-        main_layout.addWidget(self.image_drop, stretch=5)
+        left_layout.addWidget(self.image_drop, stretch=5)
 
         self.palette = ColorPalette()
-        main_layout.addWidget(self.palette, stretch=0)
+        left_layout.addWidget(self.palette, stretch=0)
 
+        main_layout.addWidget(left_container, stretch=1)
+
+        # Create the expandable section
         self.color_wheel = ColorWheel(self.palette)
         self.color_harmony = ColorHarmony(self.palette)
         self.control_panel = ControlPanel(self.palette)
@@ -617,12 +577,94 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         main_layout.addWidget(expandable_section, stretch=0)
 
+        # Set up connections
         self.image_drop.image_selected.connect(self.palette.set_image_path)
 
 
-if __name__ == "__main__":
-    app = QtWidgets.QApplication(sys.argv)
-    qt_themes.set_theme('one_dark_two')
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec_())
+class ExpandableSection(QtWidgets.QWidget):
+    def __init__(self, color_wheel: ColorWheel, color_harmony: ColorHarmony, control_panel: ControlPanel, parent: QtWidgets.QWidget = None) -> None:
+        super().__init__(parent)
+        logging.info('initializing ExpandableSection widget')
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(self.layout)
+
+        # Content panel
+        self.content_widget = QtWidgets.QWidget()
+        content_layout = QtWidgets.QVBoxLayout(self.content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Add top control panel (settings and refresh)
+        top_control = QtWidgets.QWidget()
+        top_control_layout = QtWidgets.QHBoxLayout(top_control)
+        top_control_layout.setContentsMargins(0, 0, 0, 0)
+        top_control_layout.setSpacing(0)
+
+        btn_refresh = QtWidgets.QPushButton()
+        btn_refresh.setIcon(MaterialIcon('autorenew'))
+        btn_refresh.setFixedHeight(120)
+        btn_refresh.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        btn_refresh.clicked.connect(control_panel.palette_widget.generate_colors)
+
+        btn_preferences = QtWidgets.QPushButton()
+        btn_preferences.setIcon(MaterialIcon('settings'))
+        btn_preferences.setFixedHeight(120)
+        btn_preferences.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        btn_preferences.clicked.connect(control_panel.open_preferences)
+
+        top_control_layout.addWidget(btn_refresh)
+        top_control_layout.addWidget(btn_preferences)
+        content_layout.addWidget(top_control, stretch=0)
+
+        # Add color wheel and harmony in the middle
+        content_layout.addWidget(color_wheel, stretch=1)
+        content_layout.addWidget(color_harmony, stretch=1)
+
+        # Add bottom control panel (add and remove)
+        bottom_control = QtWidgets.QWidget()
+        bottom_control_layout = QtWidgets.QHBoxLayout(bottom_control)
+        bottom_control_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_control_layout.setSpacing(0)
+
+        btn_add = QtWidgets.QPushButton()
+        btn_add.setIcon(MaterialIcon('add'))
+        btn_add.setFixedHeight(120)
+        btn_add.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        btn_add.clicked.connect(control_panel.palette_widget.add_color)
+
+        btn_remove = QtWidgets.QPushButton()
+        btn_remove.setIcon(MaterialIcon('remove'))
+        btn_remove.setFixedHeight(120)
+        btn_remove.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        btn_remove.clicked.connect(control_panel.palette_widget.remove_color)
+
+        bottom_control_layout.addWidget(btn_add)
+        bottom_control_layout.addWidget(btn_remove)
+        content_layout.addWidget(bottom_control, stretch=0)
+
+        self.content_widget.setLayout(content_layout)
+        self.content_widget.setVisible(False)
+
+        # Toggle button on the right edge
+        self.toggle_button = QtWidgets.QPushButton()
+        self.toggle_button.setIcon(MaterialIcon('chevron_left'))
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setChecked(False)
+        self.toggle_button.setFixedWidth(30)
+        self.toggle_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding)
+        self.toggle_button.clicked.connect(self.toggle_visibility)
+
+        self.layout.addWidget(self.content_widget)
+        self.layout.addWidget(self.toggle_button)
+
+        self.color_harmony = color_harmony
+
+    def toggle_visibility(self) -> None:
+        is_expanded = self.toggle_button.isChecked()
+        logging.info('toggling visibility of expandable section.')
+        self.content_widget.setVisible(is_expanded)
+        self.toggle_button.setIcon(MaterialIcon('chevron_right') if is_expanded else MaterialIcon('chevron_left'))  # Fixed icon logic
+        if is_expanded:
+            self.color_harmony.update_harmony()
