@@ -350,7 +350,7 @@ class ColorWheel(QtWidgets.QWidget):
         logging.info('initializing ColorWheel widget')
         self.palette_widget = palette_widget
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)  # Add horizontal margins
         self.setLayout(layout)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.setMinimumHeight(200)
@@ -422,8 +422,9 @@ class ColorHarmony(QtWidgets.QWidget):
         logging.info('initializing ColorHarmony widget')
         self.palette_widget = palette_widget
 
-        # We'll fix width=200, height=230 as before
-        self.setFixedSize(200, 230)
+        # Set minimum width instead of fixed width
+        self.setMinimumWidth(300)
+        self.setFixedHeight(230)
 
         # Build a vertical layout with up to 8 lines:
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -440,16 +441,15 @@ class ColorHarmony(QtWidgets.QWidget):
 
             # We fix the label's width so all sliders end up same length
             label = QtWidgets.QLabel("")
-            label.setFixedWidth(90)  # Increased from 70 to 90 to prevent text cutoff
+            label.setFixedWidth(160)  # Increased label width
             label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
 
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
             slider.setRange(0, 100)
             slider.setValue(0)
             slider.setEnabled(False)  # read-only slider
-            slider.setFixedHeight(16) # visually smaller
-            # The slider automatically becomes the same length since the row has a fixed total width of 200,
-            # minus the label's 90 px plus some margins.
+            slider.setFixedHeight(16)  # visually smaller
+            slider.setMinimumWidth(100)  # Set minimum width for slider
 
             row_layout.addWidget(label)
             row_layout.addWidget(slider, 1)  # 'stretch=1' ensures the slider takes leftover space
