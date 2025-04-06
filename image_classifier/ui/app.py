@@ -3,21 +3,32 @@ from __future__ import annotations
 import logging
 import math
 import sys
+import numpy as np
 
 from image_classifier.preferences import load_preferences, store_preferences
+from image_classifier.processing.color_harmony import (
+    circular_mean,
+    circular_diff,
+    score_complementary,
+    score_split_complementary,
+    score_triadic,
+    score_square,
+    score_monochromatic
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger().setLevel(logging.WARNING)
 
-import PySide2.QtCore as QtCore
-import PySide2.QtGui as QtGui
-import PySide2.QtWidgets as QtWidgets
+import PySide6.QtCore as QtCore
+import PySide6.QtGui as QtGui
+import PySide6.QtWidgets as QtWidgets
 import qt_themes
 from qt_material_icons import MaterialIcon
 
 from image_classifier.color import Color, ColorType
 from image_classifier.controller import analyze_palette_harmony
 from image_classifier.ui.background_process import ColorGenerationThread
+
 
 ########################################################
 # ImageDropWidget (Fills most of the window)
@@ -27,13 +38,37 @@ class ImageDropWidget(QtWidgets.QLabel):
 
     def __init__(self, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
+        # Create a container widget for the icon and text
+        self.container = QtWidgets.QWidget(self)
+        self.container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        
+        # Create a vertical layout for the container
+        layout = QtWidgets.QVBoxLayout(self.container)
+        layout.setAlignment(QtCore.Qt.AlignCenter)
+        layout.setSpacing(10)  # Space between icon and text
+        
+        # Create and add the icon label
+        self.icon_label = QtWidgets.QLabel()
+        self.icon_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.icon_pixmap = MaterialIcon("place_item").pixmap(QtCore.QSize(75, 75))
+        self.icon_label.setPixmap(self.icon_pixmap)
+        layout.addWidget(self.icon_label)
+        
+        # Create and add the text label
+        self.text_label = QtWidgets.QLabel("Drag image here or click to browse")
+        self.text_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.text_label.setStyleSheet("color: rgba(128, 128, 128, 90);")  # 35% opacity
+        layout.addWidget(self.text_label)
+        
+        # Set the container as the widget's layout
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self.layout().addWidget(self.container)
+        
         # Ignore the pixmap's default size; label can shrink below it
         self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
-
         self.setAcceptDrops(True)
         self.setAlignment(QtCore.Qt.AlignCenter)
-        self.icon_pixmap = MaterialIcon("place_item").pixmap(QtCore.QSize(75, 75))
-
+        
         self._original_pixmap = QtGui.QPixmap()
         self.show_border = True  # Initially show the border
         logging.info('initializing ImageDropWidget')
@@ -41,11 +76,17 @@ class ImageDropWidget(QtWidgets.QLabel):
         # Show pointing-hand cursor on hover
         self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
 
-        self.update_icon()
+        # Enable mouse tracking for hover events
+        self.setMouseTracking(True)
+        self.is_hovered = False
+
+        # Add attributes for color sampling circles
+        self.sampling_points = []  # List of (x, y) coordinates for each color
+        self.circle_radius = 20  # Increased radius from 10 to 20
 
     def update_icon(self) -> None:
         if not self.icon_pixmap.isNull():
-            self.setPixmap(self.icon_pixmap)
+            self.icon_label.setPixmap(self.icon_pixmap)
         else:
             logging.warning("Icon failed to load.")
 
@@ -56,9 +97,9 @@ class ImageDropWidget(QtWidgets.QLabel):
             self._update_displayed_pixmap()
             self.show_border = False  # Hide border when an image is loaded
             self.setStyleSheet("background-color: black;")
-
+            # Hide the container when an image is loaded
+            self.container.hide()
             self.update()
-
         self.image_selected.emit(path)
 
     def _update_displayed_pixmap(self) -> None:
@@ -69,6 +110,9 @@ class ImageDropWidget(QtWidgets.QLabel):
                 QtCore.Qt.SmoothTransformation
             )
             self.setPixmap(scaled)
+        else:
+            # Show the container again if no image is loaded
+            self.container.show()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -110,10 +154,96 @@ class ImageDropWidget(QtWidgets.QLabel):
             rect = self.rect().adjusted(6, 6, -6, -6)
             painter.drawRect(rect)
 
+        # Draw sampling circles if we have an image
+        if not self._original_pixmap.isNull() and self.sampling_points:
+            painter = QtGui.QPainter(self)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing)
+            
+            # Calculate scaling factors based on the actual image dimensions
+            pixmap_width = self._original_pixmap.width()
+            pixmap_height = self._original_pixmap.height()
+            widget_width = self.width()
+            widget_height = self.height()
+            
+            # Calculate the scaled dimensions while maintaining aspect ratio
+            scale = min(widget_width / pixmap_width, widget_height / pixmap_height)
+            scaled_width = pixmap_width * scale
+            scaled_height = pixmap_height * scale
+            
+            # Calculate the offset to center the image
+            x_offset = (widget_width - scaled_width) / 2
+            y_offset = (widget_height - scaled_height) / 2
+            
+            for (x, y), color in self.sampling_points:
+                # Scale and offset the coordinates
+                scaled_x = x * scale + x_offset
+                scaled_y = y * scale + y_offset
+                
+                # Draw the circle with white border
+                painter.setPen(QtGui.QPen(QtCore.Qt.white, 2))
+                painter.setBrush(QtGui.QColor(*color.rgb))
+                painter.drawEllipse(QtCore.QPointF(scaled_x, scaled_y), 
+                                  self.circle_radius, self.circle_radius)
+
     def set_border_visibility(self, visible: bool) -> None:
         logging.debug(f'changing border visibility to: {visible}')
         self.show_border = visible
         self.update()
+
+    def enterEvent(self, event: QtGui.QEvent) -> None:
+        self.is_hovered = True
+        self.text_label.setStyleSheet("color: white;")  # Make text fully opaque
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QtGui.QEvent) -> None:
+        self.is_hovered = False
+        self.text_label.setStyleSheet("color: rgba(128, 128, 128, 90);")  # 35% opacity
+        super().leaveEvent(event)
+
+    def update_circles(self, colors: list[Color]) -> None:
+        """Update the sampling points for the given colors."""
+        if self._original_pixmap.isNull():
+            return
+
+        # Convert pixmap to image for pixel access
+        image = self._original_pixmap.toImage()
+        width = image.width()
+        height = image.height()
+
+        # Number of pixels to sample
+        num_samples = 150000  # Adjust this number based on performance needs
+        self.sampling_points = []
+        
+        # Create a list of all pixel coordinates
+        pixels = [(x, y) for y in range(height) for x in range(width)]
+        
+        # Sample random pixels
+        sample_indices = np.random.choice(len(pixels), num_samples, replace=False)
+        sample_points = [pixels[i] for i in sample_indices]
+        
+        for color in colors:
+            # Get RGB values for comparison
+            target_rgb = color.rgb
+            
+            # Find the closest pixel among the samples
+            min_dist = float('inf')
+            closest_point = None
+            
+            for x, y in sample_points:
+                pixel_color = QtGui.QColor(image.pixel(x, y))
+                # Simple RGB distance calculation
+                dist = ((target_rgb[0] - pixel_color.red()) ** 2 +
+                       (target_rgb[1] - pixel_color.green()) ** 2 +
+                       (target_rgb[2] - pixel_color.blue()) ** 2)
+                
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_point = (x, y)
+            
+            if closest_point:
+                self.sampling_points.append((closest_point, color))
+        
+        self.update()  # Trigger a repaint
 
 
 ########################################################
@@ -130,7 +260,7 @@ class ColorBox(QtWidgets.QLabel):
         self,
         color: Color,
         index: int,
-        palette_widget: ColorPalette,
+        palette_widget: 'ColorPalette',
         parent: QtWidgets.QWidget = None
     ) -> None:
         super().__init__(parent)
@@ -138,12 +268,16 @@ class ColorBox(QtWidgets.QLabel):
         self.index = index
         self.palette_widget = palette_widget
         self.setAutoFillBackground(True)
-        self.setAlignment(QtCore.Qt.AlignCenter)
-        self.setContentsMargins(0, 0, 0, 0)
+        self.setAlignment(QtCore.Qt.AlignBottom | QtCore.Qt.AlignHCenter)  # Align text to bottom center
+        self.setContentsMargins(0, 0, 0, 10)  # Add bottom margin for text
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
         # Show pointing-hand cursor on hover
         self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+
+        # Enable mouse tracking for hover events
+        self.setMouseTracking(True)
+        self.is_hovered = False
 
         self.update_appearance()
         self.setToolTip("Click to pick a new color")
@@ -152,12 +286,32 @@ class ColorBox(QtWidgets.QLabel):
         palette = self.palette()
         qcolor = QtGui.QColor(*self.color.rgb)
         palette.setColor(QtGui.QPalette.Window, qcolor)
-        # White text by default if we decide to display text
-        palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+        
+        # Set text color to white or black based on background brightness
+        brightness = (qcolor.red() * 299 + qcolor.green() * 587 + qcolor.blue() * 114) / 1000
+        text_color = QtCore.Qt.white if brightness < 128 else QtCore.Qt.black
+        
+        # Create semi-transparent text color
+        text_color = QtGui.QColor(text_color)
+        text_color.setAlpha(128 if not self.is_hovered else 255)
+        palette.setColor(QtGui.QPalette.WindowText, text_color)
 
         self.setPalette(palette)
         self.setBackgroundRole(QtGui.QPalette.Window)
         self.setForegroundRole(QtGui.QPalette.WindowText)
+        
+        # Set the RGB text
+        self.setText(f"RGB: {self.color.rgb[0]}, {self.color.rgb[1]}, {self.color.rgb[2]}")
+
+    def enterEvent(self, event: QtGui.QEvent) -> None:
+        self.is_hovered = True
+        self.update_appearance()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QtGui.QEvent) -> None:
+        self.is_hovered = False
+        self.update_appearance()
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.button() == QtCore.Qt.LeftButton:
@@ -206,6 +360,7 @@ class ColorPalette(QtWidgets.QWidget):
         self.image_path = None
         self.color_wheel = None
         self.color_harmony = None
+        self.image_drop = None  # Initialize image_drop attribute
         self.preferences = load_preferences()  # Load preferences
         self.current_num_colors = self.preferences.get("num_colors", 5)  # Track current number of colors
 
@@ -243,6 +398,9 @@ class ColorPalette(QtWidgets.QWidget):
 
     def set_color_harmony(self, color_harmony: 'ColorHarmony') -> None:
         self.color_harmony = color_harmony
+
+    def set_image_drop(self, image_drop: 'ImageDropWidget') -> None:
+        self.image_drop = image_drop
 
     def generate_colors(self) -> None:
         if not self.image_path:
@@ -298,6 +456,7 @@ class ColorPalette(QtWidgets.QWidget):
         if self.color_harmony:
             self.color_harmony.update_harmony()
 
+
     def clear_colors_except_label(self) -> None:
         logging.info('clearing colors from color palette')
         for i in reversed(range(self.layout.count())):
@@ -312,6 +471,10 @@ class ColorPalette(QtWidgets.QWidget):
         for i, c in enumerate(self.colors):
             box = ColorBox(c, i, self, parent=self)
             self.layout.addWidget(box)
+        if self.color_harmony:
+            self.color_harmony.update_harmony()
+        #if self.image_drop:
+        #    self.image_drop.update_circles(self.colors)
 
     def add_color(self) -> None:
         if len(self.colors) < len(self.generated_colors):
@@ -358,6 +521,257 @@ class ColorWheel(QtWidgets.QWidget):
         self.base_wheel_size = 1024
         self.wheel_image = self.generate_wheel_image(self.base_wheel_size)
 
+        self.hovered_harmony = None  # Track which harmony is being hovered
+
+        # -- Dragging state for color dots --
+        self.dragging_index = -1
+        self.dragging_radius = 12
+        self.press_time = None  # Track when mouse was pressed
+        self.click_threshold = 200  # milliseconds to consider it a click
+
+        # Enable mouse tracking for cursor changes
+        self.setMouseTracking(True)
+        self.hovered_index = -1  # Track which color is being hovered
+
+    def set_hovered_harmony(self, harmony_name: str) -> None:
+        """Set which harmony is currently being hovered over"""
+        self.hovered_harmony = harmony_name
+        self.update()  # Trigger a repaint
+
+    def get_wheel_center_and_radius(self) -> tuple:
+        """Get the center point and radius of the color wheel in widget coordinates."""
+        w = self.width()
+        h = self.height()
+        diameter = min(w, h)
+        radius = diameter / 2.0
+        center_x = w / 2.0
+        center_y = h / 2.0
+        return (center_x, center_y), radius
+
+    def get_point_on_wheel(self, hue_deg: float, sat: float = 1.0) -> QtCore.QPointF:
+        """
+        Convert a hue angle (in degrees) + saturation ∈ [0..1]
+        to a point on the wheel.
+        """
+        w = self.width()
+        h = self.height()
+        diameter = min(w, h)
+        radius = diameter / 2.0
+        top_left_x = (w - diameter) / 2.0
+        top_left_y = (h - diameter) / 2.0
+        
+        hue_rad = math.radians(hue_deg)
+        x = top_left_x + radius + math.cos(hue_rad) * sat * radius
+        y = top_left_y + radius - math.sin(hue_rad) * sat * radius
+        return QtCore.QPointF(x, y)
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.LeftButton:
+            idx = self.find_color_under_mouse(event.pos())
+            if idx != -1:
+                self.dragging_index = idx
+                self.press_time = QtCore.QTime.currentTime()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self.dragging_index != -1:
+            hue, sat = self.pos_to_hue_sat(event.pos())
+            self.update_color_hsv(self.dragging_index, hue, sat)
+            self.update()  # redraw the wheel & dots
+        else:
+            # Check if we're hovering over a color circle
+            idx = self.find_color_under_mouse(event.pos())
+            if idx != self.hovered_index:
+                self.hovered_index = idx
+                if idx != -1:
+                    self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+                else:
+                    self.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.LeftButton and self.dragging_index != -1:
+            # Check if this was a quick click (less than threshold)
+            if self.press_time is not None:
+                elapsed = self.press_time.msecsTo(QtCore.QTime.currentTime())
+                if elapsed < self.click_threshold:
+                    # It was a click, show color picker
+                    self.show_color_picker(self.dragging_index)
+            self.dragging_index = -1
+            self.press_time = None
+        super().mouseReleaseEvent(event)
+
+    def show_color_picker(self, index: int) -> None:
+        """Show the color picker dialog for the color at the given index."""
+        initial = QtGui.QColor(*self.palette_widget.colors[index].rgb)
+        chosen = QtWidgets.QColorDialog.getColor(
+            initial=initial,
+            parent=self,
+            title="Select a Color"
+        )
+        if chosen.isValid():
+            new_color = Color((chosen.red(), chosen.green(), chosen.blue()), ColorType.RGB)
+            self.palette_widget.colors[index] = new_color
+            self.palette_widget.update_colors()
+            self.update()  # redraw the wheel & dots
+
+    def find_color_under_mouse(self, pos: QtCore.QPointF) -> int:
+        """
+        Returns the index of the color dot the user clicked on,
+        or -1 if none.
+        """
+        x_click, y_click = pos.x(), pos.y()
+        for i, color_obj in enumerate(self.palette_widget.colors):
+            hue, sat, _ = color_obj.hsv
+            dot_center = self.get_point_on_wheel(hue, sat / 255.0)
+            dx = dot_center.x() - x_click
+            dy = dot_center.y() - y_click
+            if (dx*dx + dy*dy) <= (self.dragging_radius*self.dragging_radius):
+                return i
+        return -1
+
+    def pos_to_hue_sat(self, pos: QtCore.QPointF) -> tuple[float, float]:
+        """
+        Convert mouse position to (hue, sat).
+        Hue is [0..360), sat is [0..1].
+        """
+        (cx, cy), radius = self.get_wheel_center_and_radius()
+        dx = pos.x() - cx
+        dy = cy - pos.y()  # invert y for standard geometry
+        dist = math.sqrt(dx*dx + dy*dy)
+        sat = min(dist / radius, 1.0)
+        hue = (math.degrees(math.atan2(dy, dx)) + 360.0) % 360.0
+        return hue, sat
+
+    def update_color_hsv(self, index: int, hue: float, saturation: float):
+        """
+        Update the color at 'index' in the palette to new hue/sat,
+        while preserving the original value (brightness).
+        If brightness is below 15%, set it to 15% to prevent arithmetic errors.
+        """
+        # Get the original HSV values
+        current_hsv = self.palette_widget.colors[index].hsv
+        # Enforce minimum brightness of 15% (38 in 0-255 range)
+        min_brightness = 38  # 15% of 255
+        value = max(current_hsv[2], min_brightness)
+        # Create new HSV color with updated hue and saturation, and minimum brightness
+        new_hsv = (int(round(hue)), int(round(saturation * 255)), value)
+        new_color = Color(new_hsv, color_type=ColorType.HSV)
+        self.palette_widget.colors[index] = new_color
+        self.palette_widget.update_colors()
+
+    def get_harmony_lines(self) -> list[tuple[QtCore.QPointF, QtCore.QPointF]]:
+        """
+        Calculate the lines to draw for the currently hovered harmony,
+        so we can visualize it on the wheel.
+        """
+        if not self.hovered_harmony or not self.palette_widget.colors:
+            return []
+
+        center, _ = self.get_wheel_center_and_radius()
+        center_point = QtCore.QPointF(center[0], center[1])
+        lines = []
+
+        # All hues from the palette
+        hues = [color.hsv[0] for color in self.palette_widget.colors]
+
+        # The original code for drawing harmony lines remains unchanged below:
+        if self.hovered_harmony == "Monochromatic":
+            _, mean_hue = score_monochromatic(hues)
+            if mean_hue is not None:
+                end_point = self.get_point_on_wheel(mean_hue)
+                lines.append((center_point, end_point))
+
+        elif self.hovered_harmony == "Complementary":
+            _, (cluster1, cluster2, mean1, mean2) = score_complementary(hues)
+            if mean1 is not None and mean2 is not None:
+                w = self.width()
+                h = self.height()
+                diameter = min(w, h)
+                radius = diameter / 2.0
+                top_left_x = (w - diameter) / 2.0
+                top_left_y = (h - diameter) / 2.0
+                center_x = top_left_x + radius
+                center_y = top_left_y + radius
+                
+                # Use mean1 directly as the angle to draw the line
+                angle_rad = math.radians(mean1)
+                dx = math.cos(angle_rad)
+                dy = -math.sin(angle_rad)  # Negative because y increases downward in screen coordinates
+                t = radius
+                intersection1 = QtCore.QPointF(center_x - dx * t, center_y - dy * t)
+                intersection2 = QtCore.QPointF(center_x + dx * t, center_y + dy * t)
+                lines.append((intersection1, intersection2))
+
+        elif self.hovered_harmony == "Split Complementary":
+            # Get the clusters and their means from the split complementary score function
+            _, (base_cluster, split1_cluster, split2_cluster, base_mean, split1_mean, split2_mean) = score_split_complementary(hues)
+            if base_mean is not None:
+                w = self.width()
+                h = self.height()
+                diameter = min(w, h)
+                radius = diameter / 2.0
+                top_left_x = (w - diameter) / 2.0
+                top_left_y = (h - diameter) / 2.0
+                center_x = top_left_x + radius
+                center_y = top_left_y + radius
+                center_point = QtCore.QPointF(center_x, center_y)
+                
+                # Draw three lines: one at base angle and two at 150 degrees from it
+                for angle in [base_mean, (base_mean + 150) % 360, (base_mean + 210) % 360]:
+                    angle_rad = math.radians(angle)
+                    dx = math.cos(angle_rad)
+                    dy = -math.sin(angle_rad)  # Negative because y increases downward in screen coordinates
+                    t = radius
+                    intersection = QtCore.QPointF(center_x + dx * t, center_y + dy * t)
+                    lines.append((center_point, intersection))
+
+        elif self.hovered_harmony == "Triadic":
+            _, start_hue = score_triadic(hues)
+            if start_hue is not None:
+                w = self.width()
+                h = self.height()
+                diameter = min(w, h)
+                radius = diameter / 2.0
+                top_left_x = (w - diameter) / 2.0
+                top_left_y = (h - diameter) / 2.0
+                center_x = top_left_x + radius
+                center_y = top_left_y + radius
+                center_point = QtCore.QPointF(center_x, center_y)
+                
+                # Draw three lines at 120-degree angles from the center
+                for angle in [start_hue, start_hue + 120, start_hue + 240]:
+                    angle_rad = math.radians(angle)
+                    dx = math.cos(angle_rad)
+                    dy = -math.sin(angle_rad)  # Negative because y increases downward in screen coordinates
+                    t = radius
+                    intersection = QtCore.QPointF(center_x + dx * t, center_y + dy * t)
+                    lines.append((center_point, intersection))
+
+        elif self.hovered_harmony == "Square":
+            _, start_hue = score_square(hues)
+            if start_hue is not None:
+                w = self.width()
+                h = self.height()
+                diameter = min(w, h)
+                radius = diameter / 2.0
+                top_left_x = (w - diameter) / 2.0
+                top_left_y = (h - diameter) / 2.0
+                center_x = top_left_x + radius
+                center_y = top_left_y + radius
+                center_point = QtCore.QPointF(center_x, center_y)
+                
+                # Draw four lines at 90-degree angles from the center
+                for angle in [start_hue, start_hue + 90, start_hue + 180, start_hue + 270]:
+                    angle_rad = math.radians(angle)
+                    dx = math.cos(angle_rad)
+                    dy = -math.sin(angle_rad)  # Negative because y increases downward in screen coordinates
+                    t = radius
+                    intersection = QtCore.QPointF(center_x + dx * t, center_y + dy * t)
+                    lines.append((center_point, intersection))
+
+        return lines
+
     def generate_wheel_image(self, diameter: int):
         logging.info('generating wheel image')
         image = QtGui.QImage(diameter, diameter, QtGui.QImage.Format_RGB32)
@@ -397,24 +811,39 @@ class ColorWheel(QtWidgets.QWidget):
         top_left_y = (h - diameter) / 2.0
         painter.drawImage(int(top_left_x), int(top_left_y), scaled_wheel)
 
+        # Draw harmony lines if a harmony is being hovered
+        if self.hovered_harmony:
+            harmony_lines = self.get_harmony_lines()
+            pen = QtGui.QPen(QtCore.Qt.white, 2, QtCore.Qt.DashLine)
+            painter.setPen(pen)
+            for start, end in harmony_lines:
+                painter.drawLine(start, end)
+
+        # Draw color points (the circles)
         if hasattr(self.palette_widget, 'colors'):
             for color_obj in self.palette_widget.colors:
                 hue, sat, val = color_obj.hsv
-                hue_rad = math.radians(hue)
                 sat_f = sat / 255.0
-                px = top_left_x + radius + math.cos(hue_rad) * sat_f * radius
-                py = top_left_y + radius - math.sin(hue_rad) * sat_f * radius
+                px = top_left_x + radius + math.cos(math.radians(hue)) * sat_f * radius
+                py = top_left_y + radius - math.sin(math.radians(hue)) * sat_f * radius
                 dot_radius = 12
                 pen = QtGui.QPen(QtCore.Qt.white, 2)
                 painter.setPen(pen)
                 painter.setBrush(QtGui.QColor(*color_obj.rgb))
                 painter.drawEllipse(QtCore.QPointF(px, py), dot_radius, dot_radius)
+
         painter.end()
+
+    def leaveEvent(self, event: QtGui.QEvent) -> None:
+        """Reset cursor when mouse leaves the widget"""
+        self.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+        self.hovered_index = -1
+        super().leaveEvent(event)
 
 
 class ColorHarmony(QtWidgets.QWidget):
     """
-    Displays color harmony info as 8 read-only sliders side-by-side
+    Displays color harmony info as 7 read-only sliders side-by-side
     with the color wheel.
     """
     def __init__(self, palette_widget: ColorPalette, parent: QtWidgets.QWidget = None) -> None:
@@ -426,49 +855,72 @@ class ColorHarmony(QtWidgets.QWidget):
         self.setMinimumWidth(300)
         self.setFixedHeight(230)
 
-        # Build a vertical layout with up to 8 lines:
+        # Build a vertical layout with up to 7 lines:
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setSpacing(6)
         main_layout.setContentsMargins(4, 4, 4, 4)
         self.setLayout(main_layout)
 
         self.rows = []
-        for _ in range(8):
+        for _ in range(7):
             row_widget = QtWidgets.QWidget()
             row_layout = QtWidgets.QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(4)
 
-            # We fix the label's width so all sliders end up same length
             label = QtWidgets.QLabel("")
-            label.setFixedWidth(160)  # Increased label width
+            label.setFixedWidth(160)
             label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            label.setStyleSheet("color: white;")
+
+            # Enable hover tracking
+            label.setMouseTracking(True)
+            label.enterEvent = lambda e, l=label: self.on_label_hover(l, True)
+            label.leaveEvent = lambda e, l=label: self.on_label_hover(l, False)
 
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
             slider.setRange(0, 100)
             slider.setValue(0)
             slider.setEnabled(False)  # read-only slider
-            slider.setFixedHeight(16)  # visually smaller
-            slider.setMinimumWidth(100)  # Set minimum width for slider
+            slider.setFixedHeight(16)
+            slider.setMinimumWidth(100)
 
             row_layout.addWidget(label)
-            row_layout.addWidget(slider, 1)  # 'stretch=1' ensures the slider takes leftover space
+            row_layout.addWidget(slider, 1)
             row_widget.setLayout(row_layout)
 
             self.rows.append((label, slider))
             main_layout.addWidget(row_widget)
+
+    def on_label_hover(self, label: QtWidgets.QLabel, entering: bool) -> None:
+        """Handle hover events on harmony labels."""
+        if entering:
+            harmony_name = label.text()
+            if self.palette_widget.color_wheel:
+                self.palette_widget.color_wheel.set_hovered_harmony(harmony_name)
+        else:
+            if self.palette_widget.color_wheel:
+                self.palette_widget.color_wheel.set_hovered_harmony(None)
 
     def update_harmony(self) -> None:
         logging.info('updating color harmonies as sliders')
         color_harmony = analyze_palette_harmony(self.palette_widget.colors)
         items = list(color_harmony.items())
 
-        for i in range(8):
+        for i in range(7):
             if i < len(items):
                 cat, val = items[i]
                 slider_percent = int(val * 100)  # if val is [0..1]
                 self.rows[i][0].setText(cat)
                 self.rows[i][1].setValue(slider_percent)
+                
+                # Gray out text for triadic and square when there aren't enough or too many colors
+                if cat == "Triadic" and (len(self.palette_widget.colors) < 3 or len(self.palette_widget.colors) > 3):
+                    self.rows[i][0].setStyleSheet("color: gray;")
+                elif cat == "Square" and (len(self.palette_widget.colors) < 4 or len(self.palette_widget.colors) > 4):
+                    self.rows[i][0].setStyleSheet("color: gray;")
+                else:
+                    self.rows[i][0].setStyleSheet("color: white;")
             else:
                 self.rows[i][0].setText("")
                 self.rows[i][1].setValue(0)
@@ -569,9 +1021,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.palette.set_color_wheel(self.color_wheel)
         self.palette.set_color_harmony(self.color_harmony)
+        self.palette.set_image_drop(self.image_drop)
+
+        # Create a horizontal layout for the color wheel with spacers
+        wheel_container = QtWidgets.QWidget()
+        wheel_layout = QtWidgets.QHBoxLayout(wheel_container)
+        wheel_layout.setContentsMargins(0, 0, 0, 0)
+        wheel_layout.setSpacing(0)
+        wheel_layout.addStretch(1)  # Left spacer
+        wheel_layout.addWidget(self.color_wheel, 8)  # Color wheel takes 8 parts
+        wheel_layout.addStretch(1)  # Right spacer
 
         expandable_section = ExpandableSection(
-            self.color_wheel,
+            wheel_container,  # Use the container instead of the wheel directly
             self.color_harmony,
             self.control_panel
         )
@@ -665,6 +1127,19 @@ class ExpandableSection(QtWidgets.QWidget):
         is_expanded = self.toggle_button.isChecked()
         logging.info('toggling visibility of expandable section.')
         self.content_widget.setVisible(is_expanded)
-        self.toggle_button.setIcon(MaterialIcon('chevron_right') if is_expanded else MaterialIcon('chevron_left'))  # Fixed icon logic
+        self.toggle_button.setIcon(
+            MaterialIcon('chevron_right') if is_expanded else MaterialIcon('chevron_left')
+        )
         if is_expanded:
             self.color_harmony.update_harmony()
+
+
+# If you also need to run this directly (outside a bigger project),
+# you can include a simple "if __name__ == '__main__': ..." block:
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    # Optional: apply a Qt theme if you like
+    # qt_themes.apply_stylesheet(app, theme='dark_teal.xml')
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
