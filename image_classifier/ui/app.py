@@ -4,6 +4,7 @@ import logging
 import math
 import sys
 import numpy as np
+import time  # Add at the top with other imports
 
 from image_classifier.preferences import load_preferences, store_preferences
 from image_classifier.processing.color_harmony import (
@@ -15,7 +16,10 @@ from image_classifier.processing.color_harmony import (
     score_square,
     score_monochromatic
 )
+from image_classifier.storage.palette_storage import Palette, PaletteStorage
+from datetime import datetime
 
+# Configure logging to show INFO messages
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger().setLevel(logging.WARNING)
 
@@ -28,6 +32,7 @@ from qt_material_icons import MaterialIcon
 from image_classifier.color import Color, ColorType
 from image_classifier.controller import analyze_palette_harmony
 from image_classifier.ui.background_process import ColorGenerationThread
+from image_classifier.ui.library_view import LibraryView
 
 
 ########################################################
@@ -47,6 +52,15 @@ class ImageDropWidget(QtWidgets.QLabel):
         layout.setAlignment(QtCore.Qt.AlignCenter)
         layout.setSpacing(10)  # Space between icon and text
         
+        # Add top spacer to push title up
+        layout.addStretch(1)
+        
+        # Create and add the title label
+        self.title_label = QtWidgets.QLabel("Extract color from an image and\nsave them as color palette")
+        self.title_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.title_label.setStyleSheet("color: rgba(255, 255, 255, 200); font-size: 14pt;")
+        layout.addWidget(self.title_label)
+        
         # Create and add the icon label
         self.icon_label = QtWidgets.QLabel()
         self.icon_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -54,11 +68,19 @@ class ImageDropWidget(QtWidgets.QLabel):
         self.icon_label.setPixmap(self.icon_pixmap)
         layout.addWidget(self.icon_label)
         
-        # Create and add the text label
-        self.text_label = QtWidgets.QLabel("Drag image here or click to browse")
-        self.text_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.text_label.setStyleSheet("color: rgba(128, 128, 128, 90);")  # 35% opacity
-        layout.addWidget(self.text_label)
+        # Create and add the instruction labels
+        self.drag_label = QtWidgets.QLabel("Drag and Drop your file")
+        self.drag_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.drag_label.setStyleSheet("color: rgba(255, 255, 255, 200); font-size: 18pt; font-weight: bold;")
+        layout.addWidget(self.drag_label)
+        
+        self.or_label = QtWidgets.QLabel("or Select a file from your computer")
+        self.or_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.or_label.setStyleSheet("color: rgba(255, 255, 255, 200); font-size: 12pt;")
+        layout.addWidget(self.or_label)
+        
+        # Add bottom spacer
+        layout.addStretch(1)
         
         # Set the container as the widget's layout
         self.setLayout(QtWidgets.QVBoxLayout())
@@ -83,6 +105,21 @@ class ImageDropWidget(QtWidgets.QLabel):
         # Add attributes for color sampling circles
         self.sampling_points = []  # List of (x, y) coordinates for each color
         self.circle_radius = 20  # Increased radius from 10 to 20
+        self.dragging_index = -1  # Track which circle is being dragged
+        self.dragging_radius = 20  # Radius for detecting drag
+        self.press_time = None  # Track when mouse was pressed
+        self.click_threshold = 200  # milliseconds to consider it a click
+        self.is_dragging = False  # Track if we're currently dragging
+
+        # Add caching for color matches
+        self._color_cache = {}  # Cache for color matches
+        self._last_image_hash = None  # Track if image changed
+        self._cached_pixels = None  # Cache for pixel coordinates
+        self._cached_width = None
+        self._cached_height = None
+
+        # Add a flag to track if we're currently dragging
+        self.is_user_dragging = False
 
     def update_icon(self) -> None:
         if not self.icon_pixmap.isNull():
@@ -129,15 +166,159 @@ class ImageDropWidget(QtWidgets.QLabel):
             file_path = urls[0].toLocalFile()
             self.load_image(file_path)
 
-    def mousePressEvent(self, event) -> None:
-        # Let user browse for image
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open Image", "",
-            "Images (*.png *.jpg *.jpeg *.bmp)"
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.LeftButton:
+            # First check if we're clicking on a circle
+            idx = self.find_circle_under_mouse(event.pos())
+            if idx != -1:
+                self.dragging_index = idx
+                self.press_time = QtCore.QTime.currentTime()
+                self.is_dragging = False
+                self.is_user_dragging = True  # Set the flag when user starts dragging
+            else:
+                # If not clicking on a circle, handle image selection
+                file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                    self, "Open Image", "",
+                    "Images (*.png *.jpg *.jpeg *.bmp)"
+                )
+                if file_path:
+                    logging.info(f'selected image at filepath: {file_path}')
+                    self.load_image(file_path)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self.dragging_index != -1:
+            self.is_dragging = True
+            # Get the new position
+            new_pos = self.pos_to_image_coords(event.pos())
+            if new_pos:
+                x, y = new_pos
+                # Update the sampling point
+                old_point, color = self.sampling_points[self.dragging_index]
+                self.sampling_points[self.dragging_index] = ((x, y), color)
+                # Update the color from the new position
+                self.update_color_from_position(self.dragging_index)
+                self.update()  # Trigger a repaint
+            self.setCursor(QtGui.QCursor(QtCore.Qt.CrossCursor))
+        else:
+            # Check if we're hovering over a circle
+            idx = self.find_circle_under_mouse(event.pos())
+            if idx != -1:
+                self.setCursor(QtGui.QCursor(QtCore.Qt.CrossCursor))
+                self.hovered_index = idx  # Track which circle is being hovered
+                self.update()  # Trigger a repaint to show transparency
+            else:
+                self.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+                self.hovered_index = -1  # Clear hover state
+                self.update()  # Trigger a repaint to remove transparency
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.LeftButton and self.dragging_index != -1:
+            # Check if this was a quick click (less than threshold)
+            if self.press_time is not None:
+                elapsed = self.press_time.msecsTo(QtCore.QTime.currentTime())
+                if elapsed < self.click_threshold and not self.is_dragging:
+                    # It was a click, show color picker
+                    self.show_color_picker(self.dragging_index)
+            self.dragging_index = -1
+            self.press_time = None
+            self.is_dragging = False
+            self.is_user_dragging = False  # Clear the flag when user stops dragging
+        super().mouseReleaseEvent(event)
+
+    def find_circle_under_mouse(self, pos: QtCore.QPointF) -> int:
+        """Returns the index of the circle under the mouse, or -1 if none."""
+        if not self._original_pixmap.isNull():
+            # Calculate scaling factors
+            pixmap_width = self._original_pixmap.width()
+            pixmap_height = self._original_pixmap.height()
+            widget_width = self.width()
+            widget_height = self.height()
+            
+            scale = min(widget_width / pixmap_width, widget_height / pixmap_height)
+            scaled_width = pixmap_width * scale
+            scaled_height = pixmap_height * scale
+            
+            x_offset = (widget_width - scaled_width) / 2
+            y_offset = (widget_height - scaled_height) / 2
+            
+            # Check each circle
+            for i, ((x, y), _) in enumerate(self.sampling_points):
+                scaled_x = x * scale + x_offset
+                scaled_y = y * scale + y_offset
+                
+                dx = scaled_x - pos.x()
+                dy = scaled_y - pos.y()
+                if (dx*dx + dy*dy) <= (self.dragging_radius*self.dragging_radius):
+                    return i
+        return -1
+
+    def pos_to_image_coords(self, pos: QtCore.QPointF) -> tuple[int, int] | None:
+        """Convert widget coordinates to image coordinates."""
+        if self._original_pixmap.isNull():
+            return None
+            
+        pixmap_width = self._original_pixmap.width()
+        pixmap_height = self._original_pixmap.height()
+        widget_width = self.width()
+        widget_height = self.height()
+        
+        scale = min(widget_width / pixmap_width, widget_height / pixmap_height)
+        scaled_width = pixmap_width * scale
+        scaled_height = pixmap_height * scale
+        
+        x_offset = (widget_width - scaled_width) / 2
+        y_offset = (widget_height - scaled_height) / 2
+        
+        # Convert widget coordinates to image coordinates
+        x = int((pos.x() - x_offset) / scale)
+        y = int((pos.y() - y_offset) / scale)
+        
+        # Check if the coordinates are within the image bounds
+        if 0 <= x < pixmap_width and 0 <= y < pixmap_height:
+            return (x, y)
+        return None
+
+    def update_color_from_position(self, index: int) -> None:
+        """Update the color at the given index based on its current position."""
+        if not self._original_pixmap.isNull():
+            image = self._original_pixmap.toImage()
+            (x, y), _ = self.sampling_points[index]
+            
+            if 0 <= x < image.width() and 0 <= y < image.height():
+                color = QtGui.QColor(image.pixel(x, y))
+                new_color = Color((color.red(), color.green(), color.blue()), ColorType.RGB)
+                self.sampling_points[index] = ((x, y), new_color)
+                
+                # Find the main window and update the palette
+                main_window = self.window()
+                if main_window and hasattr(main_window, 'palette'):
+                    main_window.palette.colors[index] = new_color
+                    main_window.palette.update_colors()
+                    # Update color wheel if it exists
+                    if hasattr(main_window.palette, 'color_wheel'):
+                        main_window.palette.color_wheel.update()
+                    # Update color harmony if it exists
+                    if hasattr(main_window.palette, 'color_harmony'):
+                        main_window.palette.color_harmony.update_harmony()
+
+    def show_color_picker(self, index: int) -> None:
+        """Show the color picker dialog for the color at the given index."""
+        _, color = self.sampling_points[index]
+        initial = QtGui.QColor(*color.rgb)
+        chosen = QtWidgets.QColorDialog.getColor(
+            initial=initial,
+            parent=self,
+            title="Select a Color"
         )
-        if file_path:
-            logging.info(f'selected image at filepath: {file_path}')
-            self.load_image(file_path)
+        if chosen.isValid():
+            new_color = Color((chosen.red(), chosen.green(), chosen.blue()), ColorType.RGB)
+            self.sampling_points[index] = (self.sampling_points[index][0], new_color)
+            if hasattr(self.parent(), 'palette_widget'):
+                self.parent().palette_widget.colors[index] = new_color
+                self.parent().palette_widget.update_colors()
+            self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         super().paintEvent(event)
@@ -174,16 +355,23 @@ class ImageDropWidget(QtWidgets.QLabel):
             x_offset = (widget_width - scaled_width) / 2
             y_offset = (widget_height - scaled_height) / 2
             
-            for (x, y), color in self.sampling_points:
+            for i, ((x, y), color) in enumerate(self.sampling_points):
                 # Scale and offset the coordinates
                 scaled_x = x * scale + x_offset
                 scaled_y = y * scale + y_offset
                 
                 # Draw the circle with white border
                 painter.setPen(QtGui.QPen(QtCore.Qt.white, 2))
-                painter.setBrush(QtGui.QColor(*color.rgb))
-                painter.drawEllipse(QtCore.QPointF(scaled_x, scaled_y), 
-                                  self.circle_radius, self.circle_radius)
+                
+                # Set transparency based on hover/drag state
+                alpha = 128 if (i == self.hovered_index or i == self.dragging_index) else 255
+                brush_color = QtGui.QColor(*color.rgb)
+                brush_color.setAlpha(alpha)
+                painter.setBrush(brush_color)
+                
+                # Make the circle being dragged slightly larger
+                radius = self.circle_radius * 1.2 if i == self.dragging_index else self.circle_radius
+                painter.drawEllipse(QtCore.QPointF(scaled_x, scaled_y), radius, radius)
 
     def set_border_visibility(self, visible: bool) -> None:
         logging.debug(f'changing border visibility to: {visible}')
@@ -192,58 +380,108 @@ class ImageDropWidget(QtWidgets.QLabel):
 
     def enterEvent(self, event: QtGui.QEvent) -> None:
         self.is_hovered = True
-        self.text_label.setStyleSheet("color: white;")  # Make text fully opaque
         super().enterEvent(event)
 
     def leaveEvent(self, event: QtGui.QEvent) -> None:
         self.is_hovered = False
-        self.text_label.setStyleSheet("color: rgba(128, 128, 128, 90);")  # 35% opacity
         super().leaveEvent(event)
+
+    def _get_image_hash(self) -> str:
+        """Generate a simple hash of the image for caching purposes."""
+        if self._original_pixmap.isNull():
+            return ""
+        return str(self._original_pixmap.cacheKey())
+
+    def _generate_pixel_coordinates(self, width: int, height: int) -> list:
+        """Generate or retrieve cached pixel coordinates."""
+        if (self._cached_pixels is not None and 
+            self._cached_width == width and 
+            self._cached_height == height):
+            return self._cached_pixels
+        
+        # Generate coordinates using numpy for speed
+        y_coords, x_coords = np.mgrid[0:height, 0:width]
+        pixels = np.column_stack((x_coords.ravel(), y_coords.ravel()))
+        self._cached_pixels = pixels
+        self._cached_width = width
+        self._cached_height = height
+        return pixels
 
     def update_circles(self, colors: list[Color]) -> None:
         """Update the sampling points for the given colors."""
-        if self._original_pixmap.isNull():
+        if self._original_pixmap.isNull() or self.is_user_dragging:
             return
+
+        start_time = time.time()
+        logging.info("Starting update_circles")
+
+        # Check if we can use cached results
+        current_image_hash = self._get_image_hash()
+        if current_image_hash == self._last_image_hash:
+            # Try to use cached results for each color
+            cached_points = []
+            for color in colors:
+                color_key = tuple(color.rgb)
+                if color_key in self._color_cache:
+                    cached_points.append((self._color_cache[color_key], color))
+                else:
+                    break
+            else:
+                # All colors were in cache
+                self.sampling_points = cached_points
+                self.update()
+                logging.info(f"Using cached results, took: {time.time() - start_time:.3f} seconds")
+                return
 
         # Convert pixmap to image for pixel access
         image = self._original_pixmap.toImage()
         width = image.width()
         height = image.height()
 
-        # Number of pixels to sample
-        num_samples = 150000  # Adjust this number based on performance needs
+        # Further reduce number of samples
+        num_samples = 10000  # Reduced from 50000
+        
+        # Get pixel coordinates (using cached if available)
+        all_pixels = self._generate_pixel_coordinates(width, height)
+        
+        # Sample random pixels using numpy
+        sample_indices = np.random.choice(len(all_pixels), num_samples, replace=False)
+        sample_points_np = all_pixels[sample_indices]
+        
+        # Pre-calculate all pixel colors as numpy array
+        pixel_colors_np = np.zeros((num_samples, 3), dtype=np.uint8)
+        for i, (x, y) in enumerate(sample_points_np):
+            color = QtGui.QColor(image.pixel(int(x), int(y)))
+            pixel_colors_np[i] = [color.red(), color.green(), color.blue()]
+        
+        sampling_time = time.time()
+        logging.info(f"Sampling setup took: {sampling_time - start_time:.3f} seconds")
+        
+        # Process colors that aren't in cache
         self.sampling_points = []
-        
-        # Create a list of all pixel coordinates
-        pixels = [(x, y) for y in range(height) for x in range(width)]
-        
-        # Sample random pixels
-        sample_indices = np.random.choice(len(pixels), num_samples, replace=False)
-        sample_points = [pixels[i] for i in sample_indices]
-        
         for color in colors:
-            # Get RGB values for comparison
-            target_rgb = color.rgb
-            
-            # Find the closest pixel among the samples
-            min_dist = float('inf')
-            closest_point = None
-            
-            for x, y in sample_points:
-                pixel_color = QtGui.QColor(image.pixel(x, y))
-                # Simple RGB distance calculation
-                dist = ((target_rgb[0] - pixel_color.red()) ** 2 +
-                       (target_rgb[1] - pixel_color.green()) ** 2 +
-                       (target_rgb[2] - pixel_color.blue()) ** 2)
-                
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_point = (x, y)
-            
-            if closest_point:
+            color_key = tuple(color.rgb)
+            if color_key in self._color_cache:
+                # Use cached position for existing colors
+                self.sampling_points.append((self._color_cache[color_key], color))
+            else:
+                # Calculate new position for new or changed colors
+                target_rgb = np.array(color.rgb)
+                distances = np.sum((pixel_colors_np - target_rgb) ** 2, axis=1)
+                closest_index = np.argmin(distances)
+                closest_point = tuple(sample_points_np[closest_index])
                 self.sampling_points.append((closest_point, color))
+                self._color_cache[color_key] = closest_point
+        
+        self._last_image_hash = current_image_hash
+        
+        color_matching_time = time.time()
+        logging.info(f"Color matching took: {color_matching_time - sampling_time:.3f} seconds")
         
         self.update()  # Trigger a repaint
+        
+        total_time = time.time() - start_time
+        logging.info(f"Total update_circles took: {total_time:.3f} seconds")
 
 
 ########################################################
@@ -300,8 +538,11 @@ class ColorBox(QtWidgets.QLabel):
         self.setBackgroundRole(QtGui.QPalette.Window)
         self.setForegroundRole(QtGui.QPalette.WindowText)
         
-        # Set the RGB text
-        self.setText(f"RGB: {self.color.rgb[0]}, {self.color.rgb[1]}, {self.color.rgb[2]}")
+        # Only show RGB text if we're not in progress animation
+        if not self.palette_widget.in_progress_animation:
+            self.setText(f"RGB: {self.color.rgb[0]}, {self.color.rgb[1]}, {self.color.rgb[2]}")
+        else:
+            self.setText("")
 
     def enterEvent(self, event: QtGui.QEvent) -> None:
         self.is_hovered = True
@@ -363,6 +604,7 @@ class ColorPalette(QtWidgets.QWidget):
         self.image_drop = None  # Initialize image_drop attribute
         self.preferences = load_preferences()  # Load preferences
         self.current_num_colors = self.preferences.get("num_colors", 5)  # Track current number of colors
+        self.in_progress_animation = False  # Flag to track progress animation state
 
         self.progress_timer = QtCore.QTimer(self)
         self.progress_timer.timeout.connect(self.update_progress)
@@ -417,6 +659,7 @@ class ColorPalette(QtWidgets.QWidget):
         self.color_thread.start()
 
     def start_progress_animation(self) -> None:
+        self.in_progress_animation = True  # Set progress animation flag
         self.progress_index = 0
         self.progress_timer.start(200)
         theme_bg_color = self.palette().color(QtGui.QPalette.Window)
@@ -443,6 +686,7 @@ class ColorPalette(QtWidgets.QWidget):
 
     def on_colors_generated(self, colors: list[Color]) -> None:
         self.progress_timer.stop()
+        self.in_progress_animation = False  # Clear progress animation flag
         if not colors:
             return
         logging.info('completed color generation, stopping progress animation and updating colors.')
@@ -456,7 +700,6 @@ class ColorPalette(QtWidgets.QWidget):
         if self.color_harmony:
             self.color_harmony.update_harmony()
 
-
     def clear_colors_except_label(self) -> None:
         logging.info('clearing colors from color palette')
         for i in reversed(range(self.layout.count())):
@@ -466,6 +709,7 @@ class ColorPalette(QtWidgets.QWidget):
                 widget.deleteLater()
 
     def update_colors(self) -> None:
+        start_time = time.time()
         self.clear_colors_except_label()
         logging.info('updating colors')
         for i, c in enumerate(self.colors):
@@ -473,8 +717,10 @@ class ColorPalette(QtWidgets.QWidget):
             self.layout.addWidget(box)
         if self.color_harmony:
             self.color_harmony.update_harmony()
-        #if self.image_drop:
-        #    self.image_drop.update_circles(self.colors)
+        # Only update circles if we're not in progress animation
+        if self.image_drop and not self.in_progress_animation:
+            self.image_drop.update_circles(self.colors)
+        logging.info(f"Total update_colors took: {time.time() - start_time:.3f} seconds")
 
     def add_color(self) -> None:
         if len(self.colors) < len(self.generated_colors):
@@ -528,6 +774,7 @@ class ColorWheel(QtWidgets.QWidget):
         self.dragging_radius = 12
         self.press_time = None  # Track when mouse was pressed
         self.click_threshold = 200  # milliseconds to consider it a click
+        self.is_dragging = False  # Track if we're currently dragging
 
         # Enable mouse tracking for cursor changes
         self.setMouseTracking(True)
@@ -575,8 +822,9 @@ class ColorWheel(QtWidgets.QWidget):
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if self.dragging_index != -1:
+            self.is_dragging = True
             hue, sat = self.pos_to_hue_sat(event.pos())
-            self.update_color_hsv(self.dragging_index, hue, sat)
+            self.update_color_hsv(self.dragging_index, hue, sat, update_circles=False)
             self.update()  # redraw the wheel & dots
         else:
             # Check if we're hovering over a color circle
@@ -597,8 +845,12 @@ class ColorWheel(QtWidgets.QWidget):
                 if elapsed < self.click_threshold:
                     # It was a click, show color picker
                     self.show_color_picker(self.dragging_index)
+                elif self.is_dragging:
+                    # It was a drag, update the circles
+                    self.palette_widget.update_colors()
             self.dragging_index = -1
             self.press_time = None
+            self.is_dragging = False
         super().mouseReleaseEvent(event)
 
     def show_color_picker(self, index: int) -> None:
@@ -643,7 +895,7 @@ class ColorWheel(QtWidgets.QWidget):
         hue = (math.degrees(math.atan2(dy, dx)) + 360.0) % 360.0
         return hue, sat
 
-    def update_color_hsv(self, index: int, hue: float, saturation: float):
+    def update_color_hsv(self, index: int, hue: float, saturation: float, update_circles: bool = True):
         """
         Update the color at 'index' in the palette to new hue/sat,
         while preserving the original value (brightness).
@@ -658,7 +910,8 @@ class ColorWheel(QtWidgets.QWidget):
         new_hsv = (int(round(hue)), int(round(saturation * 255)), value)
         new_color = Color(new_hsv, color_type=ColorType.HSV)
         self.palette_widget.colors[index] = new_color
-        self.palette_widget.update_colors()
+        if update_circles:
+            self.palette_widget.update_colors()
 
     def get_harmony_lines(self) -> list[tuple[QtCore.QPointF, QtCore.QPointF]]:
         """
@@ -950,29 +1203,46 @@ class PreferencesDialog(QtWidgets.QDialog):
         # Load current preferences
         self.preferences = load_preferences()
 
-        self.num_colors_label = QtWidgets.QLabel("Number of Colors:")
-        self.num_colors_spinbox = QtWidgets.QSpinBox()
-        self.num_colors_spinbox.setRange(1, 20)
-        self.num_colors_spinbox.setValue(self.preferences["num_colors"])
-
+        # Create a horizontal layout for classifier selection
+        classifier_layout = QtWidgets.QHBoxLayout()
+        
         self.classifier_label = QtWidgets.QLabel("Classifier:")
         self.classifier_combobox = QtWidgets.QComboBox()
-        self.classifier_combobox.addItems(["KMeans", "GaussianMixture", "MedianCut"])
-        self.classifier_combobox.setCurrentText(self.preferences["classifier"])
+        self.classifier_combobox.addItems([
+            "GaussianMixture (Best, Slowest)",
+            "K-Means (Good, Slow)",
+            "Median Cut (Innacurate, Fast)"
+        ])
+        
+        # Map the display names to the actual classifier names
+        self.classifier_map = {
+            "GaussianMixture (Best, Slowest)": "GaussianMixture",
+            "K-Means (Good, Slow)": "KMeans",
+            "Median Cut (Innacurate, Fast)": "MedianCut"
+        }
+        
+        # Set the current classifier in the combobox
+        current_classifier = self.preferences["classifier"]
+        for display_name, actual_name in self.classifier_map.items():
+            if actual_name == current_classifier:
+                self.classifier_combobox.setCurrentText(display_name)
+                break
+
+        classifier_layout.addWidget(self.classifier_label)
+        classifier_layout.addWidget(self.classifier_combobox)
+        classifier_layout.addStretch()
 
         self.save_button = QtWidgets.QPushButton("Save Preferences")
         self.save_button.clicked.connect(self.save_preferences)
 
-        self.layout.addWidget(self.num_colors_label)
-        self.layout.addWidget(self.num_colors_spinbox)
-        self.layout.addWidget(self.classifier_label)
-        self.layout.addWidget(self.classifier_combobox)
+        self.layout.addLayout(classifier_layout)
         self.layout.addWidget(self.save_button)
 
     def save_preferences(self):
+        # Always use 4 colors
         new_preferences = {
-            "num_colors": self.num_colors_spinbox.value(),
-            "classifier": self.classifier_combobox.currentText(),
+            "num_colors": 4,
+            "classifier": self.classifier_map[self.classifier_combobox.currentText()]
         }
         store_preferences(new_preferences)
         logging.info(f"Saved preferences: {new_preferences}")
@@ -990,15 +1260,110 @@ class PreferencesDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setGeometry(100, 100, 1200, 800)  # Made window wider to accommodate right panel
-        self.setWindowTitle("Palette Generator")
+        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("Themes")
 
-        central = QtWidgets.QWidget()
-        self.setCentralWidget(central)
-        main_layout = QtWidgets.QHBoxLayout(central)  # Changed to horizontal layout
+        # Create the main widget and layout
+        main_widget = QtWidgets.QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QtWidgets.QVBoxLayout(main_widget)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        central.setLayout(main_layout)
+
+        # Create the view selector buttons
+        self.create_view_selector(main_layout)
+
+        # Create the stacked widget to hold different views
+        self.stacked_widget = QtWidgets.QStackedWidget()
+        main_layout.addWidget(self.stacked_widget)
+
+        # Create and add the palette generator view
+        self.palette_generator_view = self.create_palette_generator_view()
+        self.stacked_widget.addWidget(self.palette_generator_view)
+
+        # Create and add the library view
+        self.library_view = LibraryView()
+        self.stacked_widget.addWidget(self.library_view)
+
+        # Connect the palette_saved signal to refresh the library view
+        expandable_section = self.palette_generator_view.findChild(ExpandableSection)
+        if expandable_section:
+            expandable_section.palette_saved.connect(self.library_view.load_palettes)
+
+    def create_view_selector(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
+        """Create the view selector buttons at the top of the window"""
+        # Create a container widget for the buttons
+        button_container = QtWidgets.QWidget()
+        button_container.setFixedHeight(40)  # Fixed height for the button bar
+        button_layout = QtWidgets.QHBoxLayout(button_container)
+        button_layout.setSpacing(0)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create the buttons
+        self.palette_generator_button = QtWidgets.QPushButton("Theme Extraction")
+        self.library_button = QtWidgets.QPushButton("Library")
+        
+        # Style the buttons
+        button_style = """
+            QPushButton {
+                border: none;
+                padding: 8px 16px;
+                background-color: #2d2d2d;
+                color: white;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+            QPushButton:pressed {
+                background-color: #4d4d4d;
+            }
+            QPushButton:checked {
+                background-color: #4d4d4d;
+            }
+        """
+        
+        # Apply the style
+        self.palette_generator_button.setStyleSheet(button_style)
+        self.library_button.setStyleSheet(button_style)
+        
+        # Make buttons checkable
+        self.palette_generator_button.setCheckable(True)
+        self.library_button.setCheckable(True)
+        
+        # Set initial state
+        self.palette_generator_button.setChecked(True)
+        
+        # Connect signals
+        self.palette_generator_button.clicked.connect(
+            lambda: self.switch_view(self.palette_generator_view, self.palette_generator_button)
+        )
+        self.library_button.clicked.connect(
+            lambda: self.switch_view(self.library_view, self.library_button)
+        )
+        
+        # Add buttons to layout
+        button_layout.addWidget(self.palette_generator_button)
+        button_layout.addWidget(self.library_button)
+        
+        # Add the button container to the parent layout
+        parent_layout.addWidget(button_container)
+
+    def switch_view(self, view: QtWidgets.QWidget, button: QtWidgets.QPushButton) -> None:
+        """Switch to the specified view and update button states"""
+        self.stacked_widget.setCurrentWidget(view)
+        # Uncheck all buttons
+        self.palette_generator_button.setChecked(False)
+        self.library_button.setChecked(False)
+        # Check the selected button
+        button.setChecked(True)
+
+    def create_palette_generator_view(self) -> QtWidgets.QWidget:
+        """Create and return the palette generator view (current UI)"""
+        view = QtWidgets.QWidget()
+        main_layout = QtWidgets.QHBoxLayout(view)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         # Left side container for image and palette
         left_container = QtWidgets.QWidget()
@@ -1033,7 +1398,7 @@ class MainWindow(QtWidgets.QMainWindow):
         wheel_layout.addStretch(1)  # Right spacer
 
         expandable_section = ExpandableSection(
-            wheel_container,  # Use the container instead of the wheel directly
+            wheel_container,
             self.color_harmony,
             self.control_panel
         )
@@ -1042,8 +1407,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # Set up connections
         self.image_drop.image_selected.connect(self.palette.set_image_path)
 
+        return view
+
 
 class ExpandableSection(QtWidgets.QWidget):
+    palette_saved = QtCore.Signal()  # Add this signal
+
     def __init__(self, color_wheel: ColorWheel, color_harmony: ColorHarmony, control_panel: ControlPanel, parent: QtWidgets.QWidget = None) -> None:
         super().__init__(parent)
         logging.info('initializing ExpandableSection widget')
@@ -1051,6 +1420,9 @@ class ExpandableSection(QtWidgets.QWidget):
         self.layout = QtWidgets.QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(self.layout)
+
+        # Initialize palette storage
+        self.palette_storage = PaletteStorage()
 
         # Content panel
         self.content_widget = QtWidgets.QWidget()
@@ -1069,20 +1441,71 @@ class ExpandableSection(QtWidgets.QWidget):
         btn_refresh.setFixedHeight(120)
         btn_refresh.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         btn_refresh.clicked.connect(control_panel.palette_widget.generate_colors)
+        btn_refresh.setToolTip("Regenerate the Theme")
 
         btn_preferences = QtWidgets.QPushButton()
         btn_preferences.setIcon(MaterialIcon('settings'))
         btn_preferences.setFixedHeight(120)
         btn_preferences.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         btn_preferences.clicked.connect(control_panel.open_preferences)
+        btn_preferences.setToolTip("Settings/Preferences")
 
         top_control_layout.addWidget(btn_refresh)
         top_control_layout.addWidget(btn_preferences)
         content_layout.addWidget(top_control, stretch=0)
 
+        # Add palette name input and save button
+        palette_control = QtWidgets.QWidget()
+        palette_control_layout = QtWidgets.QHBoxLayout(palette_control)
+        palette_control_layout.setContentsMargins(8, 8, 8, 8)
+        palette_control_layout.setSpacing(8)
+
+        # Palette name input
+        self.palette_name_input = QtWidgets.QLineEdit()
+        self.palette_name_input.setPlaceholderText("Enter theme name...")
+        self.palette_name_input.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #4d4d4d;
+            }
+        """)
+        palette_control_layout.addWidget(self.palette_name_input)
+
+        # Save palette button
+        self.save_palette_button = QtWidgets.QPushButton("Save Theme")
+        self.save_palette_button.setToolTip("Save the theme to the Library")
+        self.save_palette_button.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                background-color: #2d2d2d;
+                color: white;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #3d3d3d;
+            }
+            QPushButton:pressed {
+                background-color: #4d4d4d;
+            }
+        """)
+        self.save_palette_button.clicked.connect(self.save_current_palette)
+        palette_control_layout.addWidget(self.save_palette_button)
+
+        content_layout.addWidget(palette_control, stretch=0)
+
+        # Add spacer above color wheel
+        content_layout.addSpacerItem(QtWidgets.QSpacerItem(0, 0, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding))
+
         # Add color wheel and harmony in the middle
-        content_layout.addWidget(color_wheel, stretch=1)
-        content_layout.addWidget(color_harmony, stretch=1)
+        content_layout.addWidget(color_wheel, stretch=0)
+        content_layout.addWidget(color_harmony, stretch=0)
 
         # Add bottom control panel (add and remove)
         bottom_control = QtWidgets.QWidget()
@@ -1095,12 +1518,14 @@ class ExpandableSection(QtWidgets.QWidget):
         btn_add.setFixedHeight(120)
         btn_add.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         btn_add.clicked.connect(control_panel.palette_widget.add_color)
+        btn_add.setToolTip("Add one color to the Theme")
 
         btn_remove = QtWidgets.QPushButton()
         btn_remove.setIcon(MaterialIcon('remove'))
         btn_remove.setFixedHeight(120)
         btn_remove.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         btn_remove.clicked.connect(control_panel.palette_widget.remove_color)
+        btn_remove.setToolTip("Remove one color from the Theme")
 
         bottom_control_layout.addWidget(btn_add)
         bottom_control_layout.addWidget(btn_remove)
@@ -1117,11 +1542,13 @@ class ExpandableSection(QtWidgets.QWidget):
         self.toggle_button.setFixedWidth(30)
         self.toggle_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding)
         self.toggle_button.clicked.connect(self.toggle_visibility)
+        self.toggle_button.setToolTip("Show color controls")  # Initial tooltip
 
         self.layout.addWidget(self.content_widget)
         self.layout.addWidget(self.toggle_button)
 
         self.color_harmony = color_harmony
+        self.palette_widget = control_panel.palette_widget
 
     def toggle_visibility(self) -> None:
         is_expanded = self.toggle_button.isChecked()
@@ -1130,8 +1557,42 @@ class ExpandableSection(QtWidgets.QWidget):
         self.toggle_button.setIcon(
             MaterialIcon('chevron_right') if is_expanded else MaterialIcon('chevron_left')
         )
+        self.toggle_button.setToolTip("Hide color controls" if is_expanded else "Show color controls")
         if is_expanded:
             self.color_harmony.update_harmony()
+
+    def save_current_palette(self) -> None:
+        """Save the current palette to storage"""
+        name = self.palette_name_input.text().strip()
+        if not name:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Missing Name",
+                "Please enter a name for the palette."
+            )
+            return
+
+        # Create a new palette with current colors
+        palette = Palette(
+            name=name,
+            colors=self.palette_widget.colors,
+            date_created=datetime.now().isoformat()
+        )
+
+        try:
+            self.palette_storage.save_palette(palette)
+            QtWidgets.QMessageBox.information(
+                self,
+                "Success",
+                f"Palette '{name}' saved successfully!"
+            )
+            self.palette_saved.emit()  # Emit the signal after successful save
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to save palette: {str(e)}"
+            )
 
 
 # If you also need to run this directly (outside a bigger project),
