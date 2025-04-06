@@ -60,14 +60,15 @@ def create_palette(image_path: Path, num_colors: int, classifier_type: Classifie
 def analyze_palette_harmony(palette: list[Color]) -> dict:
     """Analyzes a palette of LAB colors"""
     hues = [color.hsv[0] for color in palette]
-    color_harmony = {'Triadic': score_triadic(hues),
-                     'Square': score_square(hues),
-                     'Analogous': score_analogous(hues),
-                     'Complementary': score_complementary(hues),
-                     'Split Complementary': score_split_complementary(hues),
-                     'Monochromatic': score_monochromatic(hues),
-                     'Contrast': score_contrast_absolute(palette),
-                     'Saturation': score_saturation_absolute(palette)}
+    color_harmony = {
+        'Triadic': score_triadic(hues)[0],
+        'Square': score_square(hues)[0],
+        'Complementary': score_complementary(hues)[0],
+        'Split Complementary': score_split_complementary(hues)[0],
+        'Monochromatic': score_monochromatic(hues)[0],
+        'Contrast': score_contrast_absolute(palette),
+        'Saturation': score_saturation_absolute(palette)
+    }
 
     for score_type, score in color_harmony.items():
         logger.info(f'{score_type}: {score:.2f}')

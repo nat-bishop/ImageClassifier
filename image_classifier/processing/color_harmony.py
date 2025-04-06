@@ -22,12 +22,35 @@ def circular_mean(angles: list[float]) -> float:
     """
     Computes the circular mean of a list of angles (in degrees).
     Uses the standard method via summing sine and cosine components.
+    When angles are evenly distributed around the circle (e.g. [0, 120, 240]),
+    the vector sum will be close to zero, and we return the first angle.
     """
+    if not angles:
+        return 0.0
 
+    # Handle special cases first
+    if len(angles) == 2:
+        # For two angles, we can compute the mean directly
+        a1, a2 = angles[0] % 360, angles[1] % 360
+        diff = circular_diff(a1, a2)
+        if abs(diff - 180) < 1e-10:
+            # For opposite angles, return their arithmetic mean
+            return ((a1 + a2) / 2) % 360
+        # Calculate the mean by going halfway from a1 to a2 in the shorter direction
+        # If a2 is clockwise from a1, add the half-diff; otherwise subtract it
+        if (a2 - a1) % 360 <= 180:
+            return (a1 + diff/2) % 360
+        else:
+            return (a1 - diff/2) % 360
+
+    # For three or more angles, use the vector method
     sin_sum = sum(math.sin(math.radians(a)) for a in angles)
     cos_sum = sum(math.cos(math.radians(a)) for a in angles)
-    if sin_sum == 0 and cos_sum == 0:
-        # Ambiguous situation (e.g. opposite pairs cancel out) – return first angle.
+    # Check if both sums are close to zero (within a small epsilon)
+    # For evenly distributed angles like [0, 120, 240], the sums should be exactly zero
+    # Use a very small epsilon to avoid false positives
+    if abs(sin_sum) < 1e-14 and abs(cos_sum) < 1e-14:
+        # Evenly distributed angles or opposite pairs cancel out – return first angle.
         mean_angle = angles[0]
     else:
         mean_angle = math.degrees(math.atan2(sin_sum, cos_sum)) % 360
@@ -35,78 +58,116 @@ def circular_mean(angles: list[float]) -> float:
     return mean_angle
 
 
-def score_triadic(hues: list[float], tolerance: float = 30) -> float:
+def score_triadic(hues: list[float], tolerance: float = 30) -> tuple[float, float]:
     """
     Returns a harmony score (0 to 1) for a triadic palette.
     A perfect triadic palette (3 hues exactly 120° apart) scores 1.
 
     The score is calculated by comparing each of the three intervals
     (including the wrap-around) to the ideal value of 120°.
+    
+    Returns:
+        tuple: (score, start_hue) where score is between 0 and 1, and start_hue is the best starting hue for visualization
     """
     if len(hues) != 3:
         logger.debug("score_triadic: Palette does not have exactly 3 hues.")
-        return 0.0
+        return 0.0, None
     sorted_hues = sorted(hues)
-    diffs = [
-        circular_diff(sorted_hues[0], sorted_hues[1]),
-        circular_diff(sorted_hues[1], sorted_hues[2]),
-        circular_diff(sorted_hues[2], sorted_hues[0])
-    ]
-    errors = [abs(diff - 120) for diff in diffs]
-    total_error = sum(errors)
-    max_error = 3 * tolerance
-    score = max(0.0, 1 - total_error / max_error)
+    best_score = 0.0
+    best_start = None
+    
+    # Try each hue as the starting point
+    for i in range(3):
+        rotated = sorted_hues[i:] + sorted_hues[:i]
+        diff1 = circular_diff(rotated[0], rotated[1])
+        diff2 = circular_diff(rotated[1], rotated[2])
+        diff3 = circular_diff(rotated[2], rotated[0])
+        errors = [abs(diff - 120) for diff in [diff1, diff2, diff3]]
+        total_error = sum(errors)
+        max_error = 3 * tolerance
+        score = max(0.0, 1 - total_error / max_error)
+        
+        if score > best_score:
+            best_score = score
+            best_start = rotated[0]
+            
     logger.debug(
-        f"score_triadic: hues={hues}, sorted={sorted_hues}, diffs={diffs}, "
+        f"score_triadic: hues={hues}, sorted={sorted_hues}, diffs={[diff1, diff2, diff3]}, "
         f"errors={errors}, total_error={total_error}, score={score}"
     )
-    return score
+    return best_score, best_start
 
 
-def score_square(hues: list[float], tolerance: float = 15) -> float:
+def score_square(hues: list[float], tolerance: float = 15) -> tuple[float, float]:
     """
     Returns a harmony score (0 to 1) for a square palette.
     In an ideal square scheme, 4 hues are exactly 90° apart.
+    
+    Returns:
+        tuple: (score, start_hue) where score is between 0 and 1, and start_hue is the best starting hue for visualization
     """
     if len(hues) != 4:
         logger.debug("score_square: Palette does not have exactly 4 hues.")
-        return 0.0
+        return 0.0, None
     sorted_hues = sorted(hues)
-    diffs = [
-        circular_diff(sorted_hues[0], sorted_hues[1]),
-        circular_diff(sorted_hues[1], sorted_hues[2]),
-        circular_diff(sorted_hues[2], sorted_hues[3]),
-        circular_diff(sorted_hues[3], sorted_hues[0])
-    ]
-    errors = [abs(diff - 90) for diff in diffs]
-    total_error = sum(errors)
-    max_error = 4 * tolerance
-    score = max(0.0, 1 - total_error / max_error)
+    best_score = 0.0
+    best_start = None
+    
+    # Try each hue as the starting point
+    for i in range(4):
+        rotated = sorted_hues[i:] + sorted_hues[:i]
+        diffs = [circular_diff(rotated[j], rotated[j+1]) for j in range(3)]
+        diffs.append(circular_diff(rotated[3], rotated[0]))
+        errors = [abs(diff - 90) for diff in diffs]
+        total_error = sum(errors)
+        max_error = 4 * tolerance
+        score = max(0.0, 1 - total_error / max_error)
+        
+        if score > best_score:
+            best_score = score
+            best_start = rotated[0]
+            
     logger.debug(
         f"score_square: hues={hues}, sorted={sorted_hues}, diffs={diffs}, "
         f"errors={errors}, total_error={total_error}, score={score}"
     )
-    return score
+    return best_score, best_start
 
 
-def score_analogous(hues: list[float], threshold: float = 120) -> float:
+def score_analogous(hues: list[float], threshold: float = 120) -> tuple[float, tuple]:
     """
     Returns a score (0 to 1) for an analogous scheme.
     The idea is that all hues should be grouped closely together.
 
     This implementation uses the range (max-min) of the hues (assuming
     they do not span the 0°/360° wrap-around) and scales the score linearly.
+    
+    Returns:
+        tuple: (score, (start_hue, arc_size)) where score is between 0 and 1,
+              and the second element contains the starting hue and arc size for visualization
     """
     if not hues:
         logger.debug("score_analogous: Empty palette.")
-        return 0.0
-    hue_range = max(hues) - min(hues)
-    score = max(0.0, 1 - hue_range / threshold)
-    logger.debug(f"score_analogous: hues={hues}, range={hue_range}, score={score}")
-    return score
+        return 0.0, (None, None)
+        
+    # Find the smallest arc that contains all hues
+    sorted_hues = sorted(hues)
+    min_arc = float('inf')
+    best_start = None
+    
+    for i in range(len(hues)):
+        rotated = sorted_hues[i:] + sorted_hues[:i]
+        arc = circular_diff(rotated[0], rotated[-1])
+        if arc < min_arc:
+            min_arc = arc
+            best_start = rotated[0]
+    
+    score = max(0.0, 1 - min_arc / threshold)
+    logger.debug(f"score_analogous: hues={hues}, range={min_arc}, score={score}")
+    return score, (best_start, min_arc)
 
 
-def score_complementary(hues: list[float], tolerance_mean: float = 60, tolerance_spread: float = 120) -> float:
+def score_complementary(hues: list[float], tolerance_mean: float = 60, tolerance_spread: float = 120) -> tuple[float, tuple]:
     """
     Returns a harmony score (0 to 1) for a complementary palette.
 
@@ -121,11 +182,15 @@ def score_complementary(hues: list[float], tolerance_mean: float = 60, tolerance
 
     These errors are normalized by their respective tolerances, combined, and
     converted to a score between 0 and 1 (with 1 being ideal).
+    
+    Returns:
+        tuple: (score, (cluster1, cluster2, mean1, mean2)) where score is between 0 and 1,
+              and the second element contains the clusters and their means for visualization
     """
     n = len(hues)
     if n < 2:
         logger.debug("score_complementary: Not enough hues.")
-        return 0.0
+        return 0.0, (None, None, None, None)
     if n == 2:
         diff = circular_diff(hues[0], hues[1])
         error = abs(diff - 180)
@@ -133,7 +198,7 @@ def score_complementary(hues: list[float], tolerance_mean: float = 60, tolerance
         logger.debug(
             f"score_complementary (n=2): hues={hues}, diff={diff}, error={error}, score={score}"
         )
-        return score
+        return score, ([hues[0]], [hues[1]], hues[0], hues[1])
 
     sorted_hues = sorted(hues)
     best_score = 0.0
@@ -156,8 +221,9 @@ def score_complementary(hues: list[float], tolerance_mean: float = 60, tolerance
             # Normalize errors:
             norm_error_mean = error_mean / tolerance_mean  # 0 if perfect; 1 if error equals tolerance_mean.
             norm_error_spread = avg_spread / tolerance_spread  # likewise for spread.
-            total_norm = (norm_error_mean + norm_error_spread) / 2  # average the two normalized errors.
-            current_score = max(0.0, 1 - total_norm)
+            # Weight angle errors more heavily (0.7) than spread errors (0.3)
+            total_error = 0.7 * norm_error_mean + 0.3 * norm_error_spread
+            current_score = max(0.0, 1 - total_error)
             logger.debug(
                 f"score_complementary split (rotated start index {i}, k={k}): "
                 f"cluster1={cluster1}, cluster2={cluster2}, mean1={mean1}, mean2={mean2}, "
@@ -169,65 +235,125 @@ def score_complementary(hues: list[float], tolerance_mean: float = 60, tolerance
                 best_score = current_score
                 best_split = (cluster1, cluster2, mean1, mean2, error_mean, avg_spread)
     logger.debug(f"score_complementary: hues={hues}, best_score={best_score}, best_split={best_split}")
-    return best_score
+    if best_split:
+        cluster1, cluster2, mean1, mean2, _, _ = best_split
+        return best_score, (cluster1, cluster2, mean1, mean2)
+    return best_score, (None, None, None, None)
 
 
-def score_split_complementary(hues: list[float], tolerance: float = 30) -> float:
+def score_split_complementary(hues: list[float], tolerance_mean: float = 15, tolerance_spread: float = 45) -> tuple[float, tuple]:
     """
     Returns a score (0 to 1) for a split-complementary scheme without assuming a fixed base hue.
 
-    In this scheme, any one hue can be the base. For the other two hues, one should be near 150° away
-    from the base and the other near 210° away. This function tests every hue as a potential base and
-    for each base it computes the error for both possible assignments of the other hues to the two ideals.
-    The best (lowest error) configuration is used to produce a score.
+    In this scheme, the hues should cluster into three groups:
+    - A base cluster
+    - Two split clusters that are approximately 150° and 210° from the base cluster's mean
+      (or equivalently, 30° on either side of the complement)
+
+    The function tries every possible way to split the hues into three clusters and finds
+    the arrangement that best matches the split-complementary pattern. The score is based on:
+    1. How close the means of the split clusters are to the ideal angles from the base (65% weight)
+    2. How tightly grouped the colors are within each cluster (35% weight)
+
+    The scoring uses a quadratic falloff for both angle and spread errors to give more credit
+    for near-perfect arrangements.
 
     Args:
-        hues (List[float]): A list of 3 hue values (in degrees).
-        tolerance (float): Tolerance for deviation from the ideal differences.
+        hues (List[float]): A list of hue values (in degrees). Must have at least 3 hues.
+        tolerance_mean (float): Tolerance for deviation from the ideal angles (in degrees).
+        tolerance_spread (float): Tolerance for spread within each cluster (in degrees).
 
     Returns:
-        float: A score between 0 and 1.
+        tuple: (score, (base_cluster, split1_cluster, split2_cluster, base_mean, split1_mean, split2_mean))
+              where score is between 0 and 1, and the second element contains the clusters and their means
+              for visualization. If no valid split is found, returns (0.0, (None, None, None, None, None, None)).
     """
-    if len(hues) != 3:
-        logger.debug("score_split_complementary: Palette does not have exactly 3 hues.")
-        return 0.0
+    if len(hues) < 3:
+        logger.debug("score_split_complementary: Palette must have at least 3 hues.")
+        return 0.0, (None, None, None, None, None, None)
 
+    # Normalize all hues to [0, 360) range
+    normalized_hues = [h % 360 for h in hues]
+    sorted_hues = sorted(normalized_hues)
     best_score = 0.0
-    best_details = None
+    best_arrangement = None
 
-    # Try each hue as the potential base.
-    for i, base in enumerate(hues):
-        # The other two hues.
-        other_hues = [h for j, h in enumerate(hues) if j != i]
+    # Try each possible way to split the hues into three clusters
+    n = len(sorted_hues)
+    for i in range(n):
+        rotated = sorted_hues[i:] + sorted_hues[:i]
+        # Try different split points to form three clusters
+        for j in range(1, n-1):
+            for k in range(j+1, n):
+                base_cluster = rotated[:j]
+                split1_cluster = rotated[j:k]
+                split2_cluster = rotated[k:]
 
-        # Compute the circular differences between the base and each of the other hues.
-        diff1 = circular_diff(base, other_hues[0])
-        diff2 = circular_diff(base, other_hues[1])
+                # All clusters must be non-empty
+                if not (base_cluster and split1_cluster and split2_cluster):
+                    continue
 
-        # Now, instead of taking the minimal error for each hue independently,
-        # we force one hue to be compared with 150° and the other with 210°.
-        # There are two possibilities:
-        error_option1 = abs(diff1 - 150) + abs(diff2 - 210)
-        error_option2 = abs(diff1 - 210) + abs(diff2 - 150)
+                # Calculate means for each cluster
+                base_mean = circular_mean(base_cluster)
+                split1_mean = circular_mean(split1_cluster)
+                split2_mean = circular_mean(split2_cluster)
 
-        total_error = min(error_option1, error_option2)
+                # Calculate target angles (150° and 210° from base_mean)
+                target1 = (base_mean + 150) % 360
+                target2 = (base_mean + 210) % 360
 
-        # The maximum total error is defined as 2*tolerance.
-        max_error = 2 * tolerance
-        current_score = max(0.0, 1 - total_error / max_error)
+                # Try both possible assignments of the split clusters to the targets
+                error1 = (circular_diff(split1_mean, target1) + circular_diff(split2_mean, target2)) / 2
+                error2 = (circular_diff(split1_mean, target2) + circular_diff(split2_mean, target1)) / 2
+                angle_error = min(error1, error2)
 
-        logger.debug(
-            f"score_split_complementary: base_candidate={base}, other_hues={other_hues}, "
-            f"diff1={diff1}, diff2={diff2}, error_option1={error_option1}, error_option2={error_option2}, "
-            f"total_error={total_error}, current_score={current_score}"
-        )
+                # Calculate spread within each cluster using circular_diff
+                def cluster_spread(cluster):
+                    if len(cluster) == 1:
+                        return 0
+                    max_diff = 0
+                    for i in range(len(cluster)):
+                        for j in range(i + 1, len(cluster)):
+                            diff = circular_diff(cluster[i], cluster[j])
+                            max_diff = max(max_diff, diff)
+                    return max_diff
 
-        if current_score > best_score:
-            best_score = current_score
-            best_details = (base, other_hues, diff1, diff2, total_error)
+                base_spread = cluster_spread(base_cluster)
+                split1_spread = cluster_spread(split1_cluster)
+                split2_spread = cluster_spread(split2_cluster)
+                avg_spread = (base_spread + split1_spread + split2_spread) / 3
 
-    logger.debug(f"score_split_complementary: hues={hues}, best_details={best_details}, best_score={best_score}")
-    return best_score
+                # Normalize errors with quadratic falloff and 65/35 weighting
+                norm_angle_error = (angle_error / tolerance_mean) ** 2
+                norm_spread_error = (avg_spread / tolerance_spread) ** 2
+                total_error = 0.65 * norm_angle_error + 0.35 * norm_spread_error
+                current_score = max(0.0, 1 - total_error)
+
+                logger.debug(
+                    f"Split at {j},{k}: base={base_cluster}(mean={base_mean}), "
+                    f"split1={split1_cluster}(mean={split1_mean}), "
+                    f"split2={split2_cluster}(mean={split2_mean}), "
+                    f"angle_error={angle_error}, avg_spread={avg_spread}, "
+                    f"score={current_score}"
+                )
+
+                if current_score > best_score:
+                    best_score = current_score
+                    # If error2 was better, swap the split clusters to match the targets
+                    if error2 < error1:
+                        split1_cluster, split2_cluster = split2_cluster, split1_cluster
+                        split1_mean, split2_mean = split2_mean, split1_mean
+                    # Normalize base_mean to 0° if it's at 360°
+                    if abs(base_mean - 360) < 1e-10:
+                        base_mean = 0
+                    best_arrangement = (base_cluster, split1_cluster, split2_cluster,
+                                      base_mean, split1_mean, split2_mean)
+
+    logger.debug(f"score_split_complementary: Final result - best_score={best_score}, "
+                f"best_arrangement={best_arrangement}")
+    if best_arrangement:
+        return best_score, best_arrangement
+    return 0.0, (None, None, None, None, None, None)
 
 
 def score_saturation_absolute(colors: list[Color]) -> float:
@@ -237,8 +363,11 @@ def score_saturation_absolute(colors: list[Color]) -> float:
     0 means completely desaturated (i.e. all colors are gray, with a=b=128),
     and 1 means the palette is as saturated as possible (with chroma near the maximum).
 
+    The score weights colors based on their brightness, giving more importance
+    to brighter colors when calculating the average saturation.
+
     Args:
-        lab_colors (List[LabColor]): List of Lab colors (each as a tuple (L, a, b)).
+        colors (List[Color]): List of colors.
 
     Returns:
         float: A score between 0 and 1.
@@ -246,16 +375,32 @@ def score_saturation_absolute(colors: list[Color]) -> float:
     if not colors:
         return 0.0
 
-    # Maximum chroma for OpenCV Lab: sqrt((128)^2 + (128)^2) ~ 181.02
-    max_chroma = math.sqrt(128 ** 2 + 128 ** 2)
-    total_chroma = 0.0
+    # In OpenCV's LAB space, maximum chroma observed for pure RGB colors is ~120
+    # This was determined empirically by testing pure RGB colors
+    max_chroma = 120.0
+    total_weighted_chroma = 0.0
+    total_weight = 0.0
+    
     for color in colors:
-        _, a, b = color.lab
+        L, a, b = color.lab
         # Calculate chroma (saturation) for this color
         chroma = math.sqrt((a - 128) ** 2 + (b - 128) ** 2)
-        total_chroma += chroma
+        
+        # Calculate weight based on lightness (L ranges from 0 to 255)
+        # We want brighter colors to have more impact on the final score
+        # A color with L=255 should have maximum weight (1.0)
+        # A color with L=0 should have minimum weight (0.0)
+        weight = L / 255.0
+        
+        weighted_chroma = chroma * weight
+        total_weighted_chroma += weighted_chroma
+        total_weight += weight
 
-    avg_chroma = total_chroma / len(colors)
+    if total_weight == 0:
+        return 0.0
+        
+    # Calculate weighted average chroma
+    avg_chroma = total_weighted_chroma / total_weight
     # Normalize the average chroma to [0, 1]
     score = avg_chroma / max_chroma
     return min(max(score, 0.0), 1.0)
@@ -278,15 +423,14 @@ def score_contrast_absolute(colors: list[Color]) -> float:
         return 0.0
 
     # Extract L values from each Lab color
-    lab_colors = [color.lab for color in colors]
-    L_values = [L for (L, a, b) in lab_colors]
+    L_values = [color.lab[0] for color in colors]
     contrast_range = max(L_values) - min(L_values)
-    # Normalize the contrast range: maximum possible is 255.
+    # Normalize the contrast range: maximum possible is 255 in OpenCV's LAB space
     score = contrast_range / 255.0
     return min(max(score, 0.0), 1.0)
 
 
-def score_monochromatic(hues: list[float], tolerance: float = 120) -> float:
+def score_monochromatic(hues: list[float], tolerance: float = 120) -> tuple[float, float]:
     """
     Returns a score (0 to 1) for a monochromatic palette.
     For a palette to be monochromatic, all hues should be very similar.
@@ -298,10 +442,10 @@ def score_monochromatic(hues: list[float], tolerance: float = 120) -> float:
                            Larger differences decrease the score linearly.
 
     Returns:
-        float: A score between 0 and 1.
+        tuple: (score, mean_hue) where score is between 0 and 1, and mean_hue is the average hue for visualization
     """
     if not hues:
-        return 0.0
+        return 0.0, None
 
     # Compute the naive range.
     min_hue = min(hues)
@@ -312,4 +456,5 @@ def score_monochromatic(hues: list[float], tolerance: float = 120) -> float:
         diff = 360 - diff
 
     score = max(0.0, 1 - (diff / tolerance))
-    return score
+    mean_hue = circular_mean(hues)
+    return score, mean_hue

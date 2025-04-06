@@ -9,7 +9,7 @@ PREFERENCES_PATH = os.path.join(PREFERENCES_DIR, 'preferences.json')
 
 # Default preferences
 DEFAULT_PREFERENCES = {
-    "num_colors": 5,
+    "num_colors": 4,
     "classifier": "GaussianMixture"
 }
 

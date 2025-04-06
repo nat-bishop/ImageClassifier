@@ -1,6 +1,6 @@
 import logging
 
-from PySide2 import QtCore
+from PySide6 import QtCore
 
 from image_classifier.classifiers.base_classifier import ClassifierType
 from image_classifier.controller import create_palette

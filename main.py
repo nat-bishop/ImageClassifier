@@ -1,6 +1,6 @@
 import sys
 from image_classifier.ui.app import MainWindow
-import PySide2.QtWidgets as QtWidgets
+import PySide6.QtWidgets as QtWidgets
 import qt_themes
 
 if __name__ == '__main__':
