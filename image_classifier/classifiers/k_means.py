@@ -23,7 +23,7 @@ class KMeansColorClassifier(ColorClassifier):
         pixels = image.reshape(-1, 3)  # Flatten image
         logger.info(f"Flattened pixels shape: {pixels.shape}")
         
-        num_samples = 50000
+        num_samples = 250000
         logger.info(f"Sampling {num_samples} pixels from {len(pixels)} total pixels")
         indices = np.random.choice(len(pixels), num_samples, replace=False)
         pixels = pixels[indices]

@@ -52,14 +52,18 @@ class ImageDropWidget(QtWidgets.QLabel):
         layout.setAlignment(QtCore.Qt.AlignCenter)
         layout.setSpacing(10)  # Space between icon and text
         
-        # Add top spacer to push title up
+        # Add top spacer to push everything up
         layout.addStretch(1)
         
         # Create and add the title label
         self.title_label = QtWidgets.QLabel("Extract color from an image and\nsave them as color palette")
         self.title_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.title_label.setStyleSheet("color: rgba(255, 255, 255, 200); font-size: 14pt;")
+        self.title_label.setStyleSheet("color: rgba(255, 255, 255, 150); font-size: 14pt;")
         layout.addWidget(self.title_label)
+        
+        # Add fixed-height spacer between title and icon
+        spacer = QtWidgets.QSpacerItem(0, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Fixed)
+        layout.addSpacerItem(spacer)
         
         # Create and add the icon label
         self.icon_label = QtWidgets.QLabel()
@@ -71,7 +75,7 @@ class ImageDropWidget(QtWidgets.QLabel):
         # Create and add the instruction labels
         self.drag_label = QtWidgets.QLabel("Drag and Drop your file")
         self.drag_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.drag_label.setStyleSheet("color: rgba(255, 255, 255, 200); font-size: 18pt; font-weight: bold;")
+        self.drag_label.setStyleSheet("color: rgba(255, 255, 255, 200); font-size: 24pt; font-weight: bold;")
         layout.addWidget(self.drag_label)
         
         self.or_label = QtWidgets.QLabel("or Select a file from your computer")
@@ -1232,17 +1236,39 @@ class PreferencesDialog(QtWidgets.QDialog):
         classifier_layout.addWidget(self.classifier_combobox)
         classifier_layout.addStretch()
 
+        # Add tour reset option
+        tour_layout = QtWidgets.QHBoxLayout()
+        self.tour_reset_button = QtWidgets.QPushButton("Reset Welcome Tour")
+        self.tour_reset_button.setToolTip("Show the welcome tour again on next launch")
+        self.tour_reset_button.clicked.connect(self.reset_tour)
+        tour_layout.addWidget(self.tour_reset_button)
+        tour_layout.addStretch()
+
         self.save_button = QtWidgets.QPushButton("Save Preferences")
         self.save_button.clicked.connect(self.save_preferences)
 
         self.layout.addLayout(classifier_layout)
+        self.layout.addLayout(tour_layout)
         self.layout.addWidget(self.save_button)
+
+    def reset_tour(self):
+        """Reset the tour preferences"""
+        self.preferences["show_welcome_tour"] = True
+        self.preferences["tour_completed"] = False
+        store_preferences(self.preferences)
+        QtWidgets.QMessageBox.information(
+            self,
+            "Tour Reset",
+            "The welcome tour will be shown on the next launch."
+        )
 
     def save_preferences(self):
         # Always use 4 colors
         new_preferences = {
             "num_colors": 4,
-            "classifier": self.classifier_map[self.classifier_combobox.currentText()]
+            "classifier": self.classifier_map[self.classifier_combobox.currentText()],
+            "show_welcome_tour": self.preferences["show_welcome_tour"],
+            "tour_completed": self.preferences["tour_completed"]
         }
         store_preferences(new_preferences)
         logging.info(f"Saved preferences: {new_preferences}")
@@ -1289,6 +1315,9 @@ class MainWindow(QtWidgets.QMainWindow):
         expandable_section = self.palette_generator_view.findChild(ExpandableSection)
         if expandable_section:
             expandable_section.palette_saved.connect(self.library_view.load_palettes)
+
+        # Show welcome dialog if needed
+        self.show_welcome_dialog()
 
     def create_view_selector(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         """Create the view selector buttons at the top of the window"""
@@ -1408,6 +1437,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.image_drop.image_selected.connect(self.palette.set_image_path)
 
         return view
+
+    def show_welcome_dialog(self):
+        """Show the welcome dialog if preferences indicate it should be shown"""
+        preferences = load_preferences()
+        if preferences.get("show_welcome_tour", True):
+            from image_classifier.ui.welcome_dialog import WelcomeDialog
+            dialog = WelcomeDialog(self)
+            dialog.exec_()
 
 
 class ExpandableSection(QtWidgets.QWidget):

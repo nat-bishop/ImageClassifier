@@ -16,7 +16,7 @@ class GMMColorClassifier(ColorClassifier):
     def extract_colors(self, image: np.ndarray, num_colors: int,) -> list[Color]:
         """Extracts dominant colors using Gaussian Mixture Models with stride-based downsampling."""
 
-        num_samples = 50000
+        num_samples = 350000
         pixels = image.reshape(-1, 3)  # Flatten image
         indices = np.random.choice(len(pixels), num_samples, replace=False)
         pixels = pixels[indices]

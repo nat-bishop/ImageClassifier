@@ -10,7 +10,9 @@ PREFERENCES_PATH = os.path.join(PREFERENCES_DIR, 'preferences.json')
 # Default preferences
 DEFAULT_PREFERENCES = {
     "num_colors": 4,
-    "classifier": "GaussianMixture"
+    "classifier": "GaussianMixture",
+    "show_welcome_tour": True,  # Whether to show the welcome tour
+    "tour_completed": False     # Whether the user has completed the tour
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
