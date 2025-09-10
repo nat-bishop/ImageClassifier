@@ -2,7 +2,9 @@
 ### Machine Learning-Powered Color Palette Extraction & Analysis Tool
 
 <p align="center">
-  <img src="./assets/hero-image.png" alt="Themes - ML Color Palette Extractor showcasing film color palettes from Dune, Batman, and other movies" width="100%">
+  <a href="https://vimeo.com/1091665286">
+    <img src="https://vumbnail.com/1091665286.jpg" alt="Themes - ML Color Palette Extractor showcasing film color palettes from Dune, Batman, and other movies — click to watch the demo video" width="100%">
+  </a>
 </p>
 
 <p align="center">
@@ -17,7 +19,7 @@
 
 A professional-grade desktop application that uses **machine learning algorithms** to extract and analyze color palettes from images, providing instant mathematical analysis of color harmony relationships. Designed for production use in **VFX pipelines** and creative workflows.
 
-**[📹 Watch Demo Video](./demo.mp4)** - See it in action extracting palettes from film shots
+**[📹 Watch Demo Video on Vimeo](https://vimeo.com/1091665286)** - Click the link to watch the demo video. See it in action extracting palettes from film shots
 
 ### ✨ Core Capabilities
 
