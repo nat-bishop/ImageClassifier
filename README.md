@@ -3,7 +3,7 @@
 
 <p align="center">
   <a href="https://vimeo.com/1091665286">
-    <img src="https://vumbnail.com/1091665286.jpg" alt="Themes - ML Color Palette Extractor showcasing film color palettes from Dune, Batman, and other movies — click to watch the demo video" width="100%">
+    <img src="/docs/hero-image.png" alt="Themes - ML Color Palette Extractor showcasing film color palettes from Dune, Batman, and other movies — click to watch the demo video" width="100%">
   </a>
 </p>
 
